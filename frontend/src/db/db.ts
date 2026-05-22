@@ -73,8 +73,8 @@ class BrainstormDB extends Dexie {
     this.version(1).stores({
       agents: '++id, name',
       sessions: '++id, status',
-      sessionAgents: '++id, session_id, agent_id',
-      rounds: '++id, session_id, round_number',
+      sessionAgents: '++id, session_id, agent_id, is_scribe',
+      rounds: '++id, [session_id+round_number]',
       messages: '++id, round_id, agent_id',
       threads: '++id, round_id, agent_id',
       threadMessages: '++id, thread_id',
