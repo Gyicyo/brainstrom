@@ -1,17 +1,20 @@
-import type { AgentRecord, MessageRecord, RoundRecord } from '../db/db';
-import { getAgent, getRoundMessages, getRounds } from '../db/helpers';
+import type { AgentRecord, MessageRecord } from '../db/db';
+import { db } from '../db/db';
+import { getRoundMessages, getRounds } from '../db/helpers';
 
 export function buildSystemPrompt(
   agent: AgentRecord,
   context: string,
   taskDescription: string,
 ): string {
-  return [
-    `You are ${agent.name}. ${agent.personality}`,
-    `Your behavior instructions: ${agent.system_prompt}`,
-    `## Current Context\n${context}`,
-    `## Task\n${taskDescription}`,
-  ].join('\n\n');
+  const parts: string[] = [];
+  parts.push(`You are ${agent.name}.${agent.personality ? ' ' + agent.personality : ''}`);
+  if (agent.system_prompt) {
+    parts.push(`Your behavior instructions: ${agent.system_prompt}`);
+  }
+  parts.push(`## Current Context\n${context}`);
+  parts.push(`## Task\n${taskDescription}`);
+  return parts.join('\n\n');
 }
 
 export async function buildDivergentContext(
@@ -20,7 +23,10 @@ export async function buildDivergentContext(
   roundId: number,
 ): Promise<string> {
   const parts: string[] = [];
-  const rounds = await getRounds(sessionId);
+  const [rounds, currentMsgs] = await Promise.all([
+    getRounds(sessionId),
+    getRoundMessages(roundId),
+  ]);
 
   // Initial message from round 1
   const firstRound = rounds.find(r => r.round_number === 1);
@@ -39,14 +45,19 @@ export async function buildDivergentContext(
     }
   }
 
-  // Current round messages
-  const currentMsgs = await getRoundMessages(roundId);
+  // Current round messages — batch-fetch agents to avoid N+1
+  const agentIds = [...new Set(
+    currentMsgs.filter(m => m.agent_id != null).map(m => m.agent_id!)
+  )];
+  const agents = agentIds.length > 0 ? await db.agents.bulkGet(agentIds) : [];
+  const agentMap = new Map(agents.filter(Boolean).map(a => [a!.id!, a!]));
+
   const msgLines: string[] = [];
   for (const m of currentMsgs) {
     if (m.is_human) {
       msgLines.push(`Human: ${m.content}`);
     } else if (m.content && m.agent_id != null) {
-      const agent = await getAgent(m.agent_id);
+      const agent = agentMap.get(m.agent_id);
       msgLines.push(`${agent?.name || 'Unknown'}: ${m.content}`);
     }
   }
