@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { listAgents, createAgent, updateAgent, deleteAgent, testAgent } from '../api/client'
+import { listAgents, createAgent, updateAgent, deleteAgent, getAgent } from '../db/helpers'
+import { callAgent } from '../llm/stream'
+import { buildSystemPrompt } from '../llm/prompt'
 import type { AgentType } from '../types'
 
 const emptyForm = {
@@ -16,7 +18,7 @@ export default function AgentConfig() {
   const [testingId, setTestingId] = useState<number | null>(null)
 
   const load = async () => {
-    try { setAgents(await listAgents()) } catch (e) { console.error(e) }
+    try { setAgents(await listAgents() as AgentType[]) } catch (e) { console.error(e) }
   }
   useEffect(() => { load() }, [])
 
@@ -45,10 +47,20 @@ export default function AgentConfig() {
   const handleTest = async (id: number) => {
     setTestingId(id)
     try {
-      const result = await testAgent(id)
-      setTestResult(result)
+      const agent = await getAgent(id)
+      if (!agent) {
+        setTestResult({ success: false, message: 'Agent not found in database' })
+        setTestingId(null)
+        return
+      }
+      const response = await callAgent(
+        agent,
+        buildSystemPrompt(agent, 'This is a connection test.', 'Respond with a brief confirmation message.'),
+        256,
+      )
+      setTestResult({ success: true, message: response })
     } catch (e: any) {
-      setTestResult({ success: false, message: e.message })
+      setTestResult({ success: false, message: e.message || String(e) })
     }
     setTestingId(null)
   }

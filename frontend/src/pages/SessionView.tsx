@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSession } from '../hooks/useSession'
-import { endSession, deleteSession, fetchSummaries } from '../api/client'
 import ChatRoom from '../components/ChatRoom'
 
 function getPhaseLabel(roundDetail: NonNullable<ReturnType<typeof useSession>['roundDetail']>): string {
@@ -43,7 +42,8 @@ export default function SessionView() {
     roundDetail, respondingAgentId, loading, error,
     streamingAgentIds, streamContents, isStreaming,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
-    handleEndRound, handleMention,
+    handleEndRound, handleMention, handleEndSession, handleDeleteSession,
+    fetchSummaries,
   } = useSession(sessionId)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -51,24 +51,24 @@ export default function SessionView() {
 
   useEffect(() => {
     if (sidebarOpen) {
-      fetchSummaries(sessionId).then(setSummaries).catch(() => {})
+      fetchSummaries().then(setSummaries).catch(() => {})
     }
-  }, [sidebarOpen, sessionId])
+  }, [sidebarOpen, sessionId, fetchSummaries])
 
-  const handleEndSession = async () => {
+  const endSession = async () => {
     if (!confirm('End this session and generate final report?')) return
     try {
-      await endSession(sessionId)
+      await handleEndSession()
       navigate('/')
     } catch (e) {
       console.error(e)
     }
   }
 
-  const handleDelete = async () => {
+  const deleteCurrent = async () => {
     if (!confirm('Delete this session and all its data?')) return
     try {
-      await deleteSession(sessionId)
+      await handleDeleteSession()
       navigate('/')
     } catch (e) {
       console.error(e)
@@ -146,7 +146,7 @@ export default function SessionView() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleDelete}
+            <button onClick={deleteCurrent}
               style={{
                 padding: '8px 16px', background: 'transparent', color: 'var(--text-secondary)',
                 border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer',
@@ -154,7 +154,7 @@ export default function SessionView() {
               }}>
               Delete
             </button>
-            <button onClick={handleEndSession}
+            <button onClick={endSession}
               style={{
                 padding: '8px 16px', background: 'var(--danger)', color: '#fff',
                 border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',

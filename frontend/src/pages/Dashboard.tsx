@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listSessions, createSession, deleteSession, listAgents } from '../api/client'
+import { listSessions, createSession, deleteSession, listAgents } from '../db/helpers'
 import type { SessionType, AgentType } from '../types'
 
 export default function Dashboard() {
@@ -14,8 +14,9 @@ export default function Dashboard() {
 
   const load = async () => {
     try {
-      setSessions(await listSessions())
-      setAgents(await listAgents())
+      const [s, a] = await Promise.all([listSessions(), listAgents()])
+      setSessions(s as SessionType[])
+      setAgents(a as AgentType[])
     } catch (e) {
       console.error('Failed to load data', e)
     }
@@ -30,7 +31,11 @@ export default function Dashboard() {
 
   const handleCreate = async () => {
     if (!topic.trim() || selectedAgents.length === 0 || scribeAgentId === null) return
-    await createSession({ topic, agent_ids: selectedAgents, scribe_agent_id: scribeAgentId })
+    await createSession(
+      { topic, status: 'active', current_round: 0 },
+      selectedAgents,
+      scribeAgentId,
+    )
     setShowCreate(false)
     setTopic('')
     setSelectedAgents([])
