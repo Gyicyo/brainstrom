@@ -20,8 +20,10 @@ def create_session(data: SessionCreate, db: Session = Depends(get_db)):
 
     for agent_id in data.agent_ids:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if agent:
-            db.add(SessionAgent(session_id=session.id, agent_id=agent_id))
+        if not agent:
+            db.rollback()
+            raise HTTPException(404, f"Agent with id {agent_id} not found")
+        db.add(SessionAgent(session_id=session.id, agent_id=agent_id))
 
     db.commit()
     db.refresh(session)

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from database import get_db
 from models import Session as SessionModel, Round, Message, Thread, ThreadMessage, Agent, SessionAgent
 from schemas import (
@@ -19,40 +19,44 @@ def _get_session(session_id: int, db: Session) -> SessionModel:
 
 
 def _get_round_detail(db: Session, session: SessionModel, round_obj: Round) -> RoundDetailResponse:
-    agents_attached = db.query(SessionAgent).filter(
-        SessionAgent.session_id == session.id
-    ).all()
+    # Eager-load all relationships to avoid N+1 queries
+    agents_attached = db.query(SessionAgent).options(
+        selectinload(SessionAgent.agent)
+    ).filter(SessionAgent.session_id == session.id).all()
+
     agent_list = []
     for sa in agents_attached:
-        agent = db.query(Agent).filter(Agent.id == sa.agent_id).first()
-        if agent:
+        if sa.agent:
             agent_list.append({
-                "id": agent.id,
-                "name": agent.name,
+                "id": sa.agent.id,
+                "name": sa.agent.name,
                 "is_scribe": sa.is_scribe,
             })
 
-    messages = db.query(Message).filter(Message.round_id == round_obj.id).order_by(Message.created_at).all()
+    messages = db.query(Message).options(
+        selectinload(Message.agent)
+    ).filter(Message.round_id == round_obj.id).order_by(Message.created_at).all()
+
     msg_responses = []
     for m in messages:
-        agent_name = ""
-        if m.agent_id:
-            agent = db.query(Agent).filter(Agent.id == m.agent_id).first()
-            agent_name = agent.name if agent else ""
         msg_responses.append(MessageResponse(
-            id=m.id, agent_id=m.agent_id, agent_name=agent_name,
+            id=m.id, agent_id=m.agent_id,
+            agent_name=m.agent.name if m.agent else "",
             is_human=m.is_human, content=m.content, created_at=m.created_at,
         ))
 
-    threads = db.query(Thread).filter(Thread.round_id == round_obj.id).all()
+    threads = db.query(Thread).options(
+        selectinload(Thread.agent),
+        selectinload(Thread.messages),
+    ).filter(Thread.round_id == round_obj.id).all()
+
     thread_responses = []
     for t in threads:
-        agent = db.query(Agent).filter(Agent.id == t.agent_id).first()
-        tmsgs = db.query(ThreadMessage).filter(ThreadMessage.thread_id == t.id).order_by(ThreadMessage.created_at).all()
         thread_responses.append(ThreadResponse(
-            id=t.id, agent_id=t.agent_id, agent_name=agent.name if agent else "",
+            id=t.id, agent_id=t.agent_id,
+            agent_name=t.agent.name if t.agent else "",
             messages=[ThreadMessageResponse(id=tm.id, is_human=tm.is_human, content=tm.content, created_at=tm.created_at)
-                      for tm in tmsgs],
+                      for tm in t.messages],
             created_at=t.created_at,
         ))
 
@@ -110,22 +114,23 @@ def get_current_round(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/divergent", response_model=RoundDetailResponse)
-def divergent_round(data: DivergentRequest, db: Session = Depends(get_db)):
+def divergent_round(session_id: int, data: DivergentRequest, db: Session = Depends(get_db)):
     """Trigger each non-scribe agent to produce a divergent statement."""
-    session = _get_session(data.session_id, db)
+    session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == data.round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
 
-    session_agents = db.query(SessionAgent).filter(
+    session_agents = db.query(SessionAgent).options(
+        selectinload(SessionAgent.agent)
+    ).filter(
         SessionAgent.session_id == session.id,
         SessionAgent.is_scribe == False,
     ).all()
 
     for sa in session_agents:
-        agent = db.query(Agent).filter(Agent.id == sa.agent_id).first()
-        if agent:
-            msg = Message(round_id=round_obj.id, agent_id=agent.id, is_human=False, content="")
+        if sa.agent:
+            msg = Message(round_id=round_obj.id, agent_id=sa.agent.id, is_human=False, content="")
             db.add(msg)
 
     db.commit()
@@ -133,9 +138,9 @@ def divergent_round(data: DivergentRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/mention", response_model=RoundDetailResponse)
-def mention_agent(data: MentionRequest, db: Session = Depends(get_db)):
+def mention_agent(session_id: int, data: MentionRequest, db: Session = Depends(get_db)):
     """Human @mentions an agent, starting a private thread."""
-    session = _get_session(data.session_id, db)
+    session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == data.round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
@@ -156,9 +161,9 @@ def mention_agent(data: MentionRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/end-round", response_model=RoundDetailResponse)
-def end_round(data: EndRoundRequest, db: Session = Depends(get_db)):
-    """Mark round complete (scribe summary generated separately)."""
-    session = _get_session(data.session_id, db)
+def end_round(session_id: int, data: EndRoundRequest, db: Session = Depends(get_db)):
+    """End the round — triggers scribe summary generation in later tasks."""
+    session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == data.round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
