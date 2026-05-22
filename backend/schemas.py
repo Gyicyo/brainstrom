@@ -111,7 +111,7 @@ class DivergentRequest(BaseModel):
 
 class MentionRequest(BaseModel):
     round_id: int
-    agent_id: int
+    agent_ids: list[int]
     question: str
 
 
