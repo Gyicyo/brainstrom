@@ -22,6 +22,49 @@ def _get_session(session_id: int, db: Session) -> SessionModel:
     return session
 
 
+def _build_divergent_context(session, db, round_obj) -> str:
+    """Build accumulated context: topic + initial msg + past summaries + current msgs."""
+    parts = []
+    if session.topic:
+        parts.append(f"## Session Topic\n{session.topic}")
+
+    # User's initial message from round 1
+    first_round = db.query(Round).filter(
+        Round.session_id == session.id, Round.round_number == 1
+    ).first()
+    if first_round:
+        initial_msg = db.query(Message).filter(
+            Message.round_id == first_round.id, Message.is_human == True
+        ).order_by(Message.created_at).first()
+        if initial_msg and initial_msg.content:
+            parts.append(f"## Initial Context\n{initial_msg.content}")
+
+    # Previous rounds' scribe summaries
+    prev_rounds = db.query(Round).filter(
+        Round.session_id == session.id,
+        Round.round_number < round_obj.round_number,
+        Round.scribe_summary.isnot(None),
+        Round.scribe_summary != "",
+    ).order_by(Round.round_number).all()
+    for pr in prev_rounds:
+        parts.append(f"## Round {pr.round_number} Summary\n{pr.scribe_summary}")
+
+    # Current round discussion
+    current_msgs = db.query(Message).options(
+        selectinload(Message.agent)
+    ).filter(Message.round_id == round_obj.id).order_by(Message.created_at).all()
+    msg_lines = []
+    for m in current_msgs:
+        if m.is_human:
+            msg_lines.append(f"Human: {m.content}")
+        elif m.content and m.agent:
+            msg_lines.append(f"{m.agent.name}: {m.content}")
+    if msg_lines:
+        parts.append(f"## Current Discussion\n" + "\n".join(msg_lines))
+
+    return "\n\n".join(parts)
+
+
 def _get_round_detail(db: Session, session: SessionModel, round_obj: Round) -> RoundDetailResponse:
     # Eager-load all relationships to avoid N+1 queries
     agents_attached = db.query(SessionAgent).options(
@@ -87,6 +130,23 @@ def list_rounds(session_id: int, db: Session = Depends(get_db)):
             public_messages=[], private_threads=[], created_at=r.created_at,
         ))
     return result
+
+
+@router.get("/summaries")
+def list_round_summaries(session_id: int, db: Session = Depends(get_db)):
+    """Return all rounds' scribe summaries for a session."""
+    session = _get_session(session_id, db)
+    rounds = db.query(Round).filter(
+        Round.session_id == session.id,
+    ).order_by(Round.round_number).all()
+    return [
+        {
+            "round_number": r.round_number,
+            "summary": r.scribe_summary or "",
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rounds if r.scribe_summary
+    ]
 
 
 @router.post("/start", response_model=RoundDetailResponse, status_code=201)
@@ -168,20 +228,15 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
         SessionAgent.is_scribe == False,
     ).all()
 
-    existing_messages = db.query(Message).filter(
-        Message.round_id == round_id
-    ).order_by(Message.created_at).all()
-
-    context_parts = []
-    for m in existing_messages:
-        if m.is_human:
-            context_parts.append(f"Human: {m.content}")
-    context = "\n".join(context_parts) if context_parts else session.topic or ""
+    context = _build_divergent_context(session, db, round_obj)
 
     agent_tasks = []
     for sa in session_agents:
         if sa.agent:
-            msg = next((m for m in existing_messages if m.agent_id == sa.agent.id), None)
+            msg = db.query(Message).filter(
+                Message.round_id == round_id,
+                Message.agent_id == sa.agent.id
+            ).first()
             if msg:
                 prompt = build_system_prompt(
                     sa.agent, context,
