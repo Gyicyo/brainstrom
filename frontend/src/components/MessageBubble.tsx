@@ -5,18 +5,24 @@ import type { MessageType } from '../types'
 interface Props {
   message: MessageType;
   isHuman?: boolean;
+  streamingContent?: string;
 }
 
-export default function MessageBubble({ message, isHuman }: Props) {
+export default function MessageBubble({ message, isHuman, streamingContent }: Props) {
   const [expanded, setExpanded] = useState(false)
 
   const align = isHuman ? 'flex-end' : 'flex-start'
   const border = isHuman ? '2px solid var(--bubble-human-border)' : '1px solid var(--bubble-ai-border)'
 
-  const firstLine = message.content.split('\n')[0]
-  const isTruncatable = message.content.length > 120 || message.content !== firstLine
+  // Streaming state: no tokens yet — show thinking indicator
+  const isThinking = streamingContent !== undefined && streamingContent === '' && !message.content
+  // Streaming state: has partial tokens — show them
+  const displayContent = streamingContent !== undefined ? streamingContent : message.content
+
+  const firstLine = displayContent.split('\n')[0]
+  const isTruncatable = displayContent.length > 120 || displayContent !== firstLine
   const preview = firstLine.length > 120 ? firstLine.slice(0, 120) + '...' : firstLine
-  const showEllipsis = isTruncatable && !expanded
+  const showEllipsis = isTruncatable && !expanded && streamingContent === undefined
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: align, marginBottom: 16 }}>
@@ -29,16 +35,32 @@ export default function MessageBubble({ message, isHuman }: Props) {
           boxShadow: 'var(--bubble-shadow)',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           cursor: showEllipsis ? 'pointer' : 'default',
+          minHeight: isThinking ? 40 : undefined,
+          display: 'flex', alignItems: isThinking ? 'center' : undefined,
         }} onClick={() => showEllipsis && setExpanded(true)}>
-          {expanded ? message.content : (showEllipsis ? `${preview}...` : message.content)}
-
-          {showEllipsis && (
-            <div style={{
-              marginTop: 8, fontSize: 12, color: 'var(--primary)', fontWeight: 500,
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              Click to expand <span>▼</span>
-            </div>
+          {isThinking ? (
+            <span className="thinking-dots">
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+              <span className="thinking-dot" />
+              <span style={{ marginLeft: 6, fontSize: 13, color: 'var(--text-muted)' }}>
+                thinking...
+              </span>
+            </span>
+          ) : streamingContent !== undefined ? (
+            displayContent || ' '
+          ) : (
+            <>
+              {expanded ? message.content : (showEllipsis ? `${preview}...` : message.content)}
+              {showEllipsis && (
+                <div style={{
+                  marginTop: 8, fontSize: 12, color: 'var(--primary)', fontWeight: 500,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  Click to expand <span>▼</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -47,7 +69,7 @@ export default function MessageBubble({ message, isHuman }: Props) {
         paddingLeft: 42, display: 'flex', alignItems: 'center', gap: 8,
       }}>
         <span>{message.agent_name}{isHuman ? ' (You)' : ''} · {new Date(message.created_at).toLocaleTimeString()}</span>
-        {expanded && isTruncatable && (
+        {expanded && isTruncatable && streamingContent === undefined && (
           <button onClick={(e) => { e.stopPropagation(); setExpanded(false) }}
             style={{
               background: 'none', border: 'none', color: 'var(--text-muted)',

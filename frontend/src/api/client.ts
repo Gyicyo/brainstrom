@@ -58,3 +58,42 @@ export const endRound = (sessionId: number, roundId: number) =>
     method: 'POST',
     body: JSON.stringify({ round_id: roundId }),
   });
+
+// SSE streaming for divergent phase
+interface StreamCallbacks {
+  onAgentStart: (data: { agent_id: number; agent_name: string; message_id: number }) => void;
+  onToken: (data: { agent_id: number; token: string }) => void;
+  onAgentDone: (data: { agent_id: number }) => void;
+  onError: (data: { agent_id: number; error: string }) => void;
+  onComplete: () => void;
+}
+
+export function streamDivergent(
+  sessionId: number, roundId: number,
+  callbacks: StreamCallbacks,
+): () => void {
+  const es = new EventSource(`/api/sessions/${sessionId}/rounds/${roundId}/stream-divergent`);
+
+  es.addEventListener('agent_start', (e) => {
+    callbacks.onAgentStart(JSON.parse(e.data));
+  });
+  es.addEventListener('token', (e) => {
+    callbacks.onToken(JSON.parse(e.data));
+  });
+  es.addEventListener('agent_done', (e) => {
+    callbacks.onAgentDone(JSON.parse(e.data));
+  });
+  es.addEventListener('agent_error', (e) => {
+    callbacks.onError(JSON.parse(e.data));
+  });
+  es.addEventListener('complete', () => {
+    es.close();
+    callbacks.onComplete();
+  });
+  es.onerror = () => {
+    es.close();
+    callbacks.onError({ agent_id: -1, error: 'Connection lost' });
+  };
+
+  return () => es.close();
+}

@@ -7,9 +7,10 @@ interface AgentInfo {
 interface Props {
   agents: AgentInfo[];
   respondingAgentId?: number | null;
+  streamingAgentIds?: Set<number>;
 }
 
-export default function AgentStatusBar({ agents, respondingAgentId }: Props) {
+export default function AgentStatusBar({ agents, respondingAgentId, streamingAgentIds }: Props) {
   const nonScribe = agents.filter(a => !a.is_scribe)
 
   return (
@@ -21,22 +22,33 @@ export default function AgentStatusBar({ agents, respondingAgentId }: Props) {
     }}>
       {nonScribe.map(a => {
         const isResponding = a.id === respondingAgentId
+        const isStreaming = streamingAgentIds?.has(a.id)
+        const active = isResponding || isStreaming
         return (
           <div key={a.id} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '4px 10px', borderRadius: 'var(--radius-full)', fontSize: 12,
-            background: isResponding ? 'var(--accent-light)' : 'var(--bg)',
-            color: isResponding ? 'var(--accent)' : 'var(--text-secondary)',
+            background: active ? 'var(--accent-light)' : 'var(--bg)',
+            color: active ? 'var(--accent)' : 'var(--text-secondary)',
             transition: 'all 0.15s',
           }}>
             <span style={{
               width: 8, height: 8, borderRadius: '50%',
-              background: isResponding ? 'var(--accent)' : 'var(--success)',
+              background: active ? 'var(--accent)' : 'var(--success)',
               display: 'inline-block',
               transition: 'background 0.15s',
             }} />
             {a.name}
             {isResponding && ' (responding...)'}
+            {isStreaming && !isResponding && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 2 }}>
+                <span className="thinking-dots" style={{ gap: 2 }}>
+                  <span className="thinking-dot" style={{ width: 4, height: 4 }} />
+                  <span className="thinking-dot" style={{ width: 4, height: 4 }} />
+                  <span className="thinking-dot" style={{ width: 4, height: 4 }} />
+                </span>
+              </span>
+            )}
           </div>
         )
       })}

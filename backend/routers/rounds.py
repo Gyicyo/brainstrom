@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 from database import get_db
 from models import Session as SessionModel, Round, Message, Thread, ThreadMessage, Agent, SessionAgent
@@ -7,6 +10,7 @@ from schemas import (
     MessageResponse, ThreadResponse, ThreadMessageResponse,
     DivergentRequest, MentionRequest, StartRoundRequest, EndRoundRequest,
 )
+from services.agent_proxy import build_system_prompt, stream_agent
 
 router = APIRouter(prefix="/api/sessions/{session_id}/rounds", tags=["rounds"])
 
@@ -146,6 +150,73 @@ def divergent_round(session_id: int, data: DivergentRequest, db: Session = Depen
 
     db.commit()
     return _get_round_detail(db, session, round_obj)
+
+
+@router.get("/{round_id}/stream-divergent")
+async def stream_divergent(session_id: int, round_id: int, db: Session = Depends(get_db)):
+    """SSE endpoint: stream each non-scribe agent's LLM response token-by-token."""
+    session = _get_session(session_id, db)
+    round_obj = db.query(Round).filter(Round.id == round_id).first()
+    if not round_obj:
+        raise HTTPException(404, "Round not found")
+
+    # Pre-fetch all data while the DB session is active
+    session_agents = db.query(SessionAgent).options(
+        selectinload(SessionAgent.agent)
+    ).filter(
+        SessionAgent.session_id == session.id,
+        SessionAgent.is_scribe == False,
+    ).all()
+
+    existing_messages = db.query(Message).filter(
+        Message.round_id == round_id
+    ).order_by(Message.created_at).all()
+
+    context_parts = []
+    for m in existing_messages:
+        if m.is_human:
+            context_parts.append(f"Human: {m.content}")
+    context = "\n".join(context_parts) if context_parts else session.topic or ""
+
+    agent_tasks = []
+    for sa in session_agents:
+        if sa.agent:
+            msg = next((m for m in existing_messages if m.agent_id == sa.agent.id), None)
+            if msg:
+                prompt = build_system_prompt(
+                    sa.agent, context,
+                    "Provide your unique perspective on this topic. Be creative and specific.",
+                )
+                agent_tasks.append((sa.agent, msg, prompt))
+
+    async def event_generator():
+        from database import SessionLocal
+        gen_db = SessionLocal()
+        try:
+            for agent, msg, prompt in agent_tasks:
+                try:
+                    yield f"event: agent_start\ndata: {json.dumps({'agent_id': agent.id, 'agent_name': agent.name, 'message_id': msg.id})}\n\n"
+
+                    full_content = ""
+                    async for token in stream_agent(agent, prompt):
+                        full_content += token
+                        yield f"event: token\ndata: {json.dumps({'agent_id': agent.id, 'token': token})}\n\n"
+
+                    # Persist full content to DB
+                    db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
+                    if db_msg:
+                        db_msg.content = full_content
+                        gen_db.commit()
+
+                    yield f"event: agent_done\ndata: {json.dumps({'agent_id': agent.id})}\n\n"
+                except Exception as e:
+                    yield f"event: agent_error\ndata: {json.dumps({'agent_id': agent.id, 'error': str(e)})}\n\n"
+
+            yield f"event: complete\ndata: {{}}\n\n"
+        finally:
+            gen_db.close()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/mention", response_model=RoundDetailResponse)

@@ -13,11 +13,15 @@ interface Props {
   onEndRound: () => void;
   respondingAgentId: number | null;
   loading: boolean;
+  streamingAgentIds?: Set<number>;
+  streamContents?: Record<number, string>;
+  isStreaming?: boolean;
 }
 
 export default function ChatRoom({
   roundDetail, onSendMention, onCreateRound, onStartDivergent,
   onStartNextRound, onEndRound, respondingAgentId, loading,
+  streamingAgentIds, streamContents, isStreaming,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [mentionText, setMentionText] = useState('')
@@ -26,7 +30,7 @@ export default function ChatRoom({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [roundDetail])
+  }, [roundDetail, streamContents])
 
   // State A: No round yet — show initial context input
   if (!roundDetail) {
@@ -71,7 +75,29 @@ export default function ChatRoom({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <AgentStatusBar agents={agents_attached} respondingAgentId={respondingAgentId} />
+      <AgentStatusBar
+        agents={agents_attached}
+        respondingAgentId={respondingAgentId}
+        streamingAgentIds={streamingAgentIds}
+      />
+
+      {/* Streaming banner */}
+      {isStreaming && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px', marginBottom: 12, flexShrink: 0,
+          background: 'var(--accent-light)', borderRadius: 'var(--radius)',
+          border: '1px solid var(--primary-border)',
+          fontSize: 13, color: 'var(--accent)', fontWeight: 500,
+        }}>
+          <span className="thinking-dots">
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
+            <span className="thinking-dot" />
+          </span>
+          Agents are generating responses...
+        </div>
+      )}
 
       {/* Scrollable message area - fills remaining space */}
       <div style={{
@@ -89,7 +115,12 @@ export default function ChatRoom({
           </p>
         ) : (
           current_round.public_messages.map(m => (
-            <MessageBubble key={m.id} message={m} isHuman={m.is_human} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              isHuman={m.is_human}
+              streamingContent={m.agent_id !== null ? streamContents?.[m.agent_id] : undefined}
+            />
           ))
         )}
 
@@ -135,14 +166,14 @@ export default function ChatRoom({
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, textAlign: 'center' }}>
               Initial context submitted. Ready to start the agent discussion?
             </p>
-            <button onClick={onStartDivergent} disabled={loading}
+            <button onClick={onStartDivergent} disabled={loading || isStreaming}
               style={{
                 padding: '10px 28px',
-                background: loading ? '#D1D5DB' : 'var(--primary)',
+                background: loading || isStreaming ? '#D1D5DB' : 'var(--primary)',
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+                cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
-              {loading ? 'Starting...' : 'Start Agent Discussion'}
+              {loading || isStreaming ? 'Starting...' : 'Start Agent Discussion'}
             </button>
           </div>
         )}
@@ -156,10 +187,11 @@ export default function ChatRoom({
           {/* @mention input */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexShrink: 0 }}>
             <select value={selectedAgent || ''} onChange={e => setSelectedAgent(Number(e.target.value) || null)}
+              disabled={!!isStreaming}
               style={{
                 padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
                 fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)',
-                minWidth: 160, outline: 'none',
+                minWidth: 160, outline: 'none', opacity: isStreaming ? 0.5 : 1,
               }}>
               <option value="">@mention an agent...</option>
               {nonScribeAgents.map(a => (
@@ -167,28 +199,32 @@ export default function ChatRoom({
               ))}
             </select>
             <input value={mentionText} onChange={e => setMentionText(e.target.value)}
+              disabled={!!isStreaming}
               onKeyDown={e => {
-                if (e.key === 'Enter' && selectedAgent && mentionText.trim()) {
+                if (e.key === 'Enter' && selectedAgent && mentionText.trim() && !isStreaming) {
                   onSendMention(selectedAgent, mentionText.trim())
                   setMentionText('')
                 }
               }}
-              placeholder="Ask a follow-up..."
+              placeholder={isStreaming ? 'Waiting for responses...' : "Ask a follow-up..."}
               style={{
                 flex: 1, padding: '8px 12px', border: '1px solid var(--border)',
                 borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
                 background: 'var(--surface)', color: 'var(--text-primary)',
+                opacity: isStreaming ? 0.5 : 1,
               }}
             />
             <button onClick={() => {
-              if (selectedAgent && mentionText.trim()) {
+              if (selectedAgent && mentionText.trim() && !isStreaming) {
                 onSendMention(selectedAgent, mentionText.trim())
                 setMentionText('')
               }
             }}
+              disabled={!!isStreaming}
               style={{
-                padding: '8px 20px', background: 'var(--accent)', color: '#fff',
-                border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
+                padding: '8px 20px', background: isStreaming ? '#D1D5DB' : 'var(--accent)',
+                color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                cursor: isStreaming ? 'not-allowed' : 'pointer',
                 fontSize: 14, fontWeight: 500, flexShrink: 0,
               }}>
               @Send
@@ -197,21 +233,21 @@ export default function ChatRoom({
 
           {/* Round controls */}
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button onClick={onEndRound} disabled={loading}
+            <button onClick={onEndRound} disabled={loading || !!isStreaming}
               style={{
                 padding: '8px 20px',
-                background: loading ? '#D1D5DB' : 'var(--accent)',
+                background: loading || isStreaming ? '#D1D5DB' : 'var(--accent)',
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+                cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
               End Round & Summarize
             </button>
-            <button onClick={onStartNextRound} disabled={loading}
+            <button onClick={onStartNextRound} disabled={loading || !!isStreaming}
               style={{
                 padding: '8px 20px',
-                background: loading ? '#D1D5DB' : 'var(--primary)',
+                background: loading || isStreaming ? '#D1D5DB' : 'var(--primary)',
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+                cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
               Start Next Round
             </button>

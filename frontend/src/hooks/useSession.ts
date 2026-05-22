@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getCurrentRound, startNewRound, endRound, divergentRound, mentionAgent,
+  streamDivergent,
 } from '../api/client'
 import type { RoundDetailType } from '../types'
 
@@ -9,6 +10,11 @@ export function useSession(sessionId: number) {
   const [respondingAgentId, setRespondingAgentId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set())
+  const [streamContents, setStreamContents] = useState<Record<number, string>>({})
+
+  // Store streaming cleanup function for unmount
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -16,12 +22,19 @@ export function useSession(sessionId: number) {
       const detail = await getCurrentRound(sessionId)
       setRoundDetail(detail)
     } catch (e: any) {
-      // No current round = session just created, that's fine
       setRoundDetail(null)
     }
   }, [sessionId])
 
   useEffect(() => { load() }, [load])
+
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.()
+      cleanupRef.current = null
+    }
+  }, [])
 
   const handleCreateRound = async (initialMessage: string) => {
     setLoading(true)
@@ -37,13 +50,69 @@ export function useSession(sessionId: number) {
   const handleStartDivergent = async () => {
     if (!roundDetail) return
     setLoading(true)
+    setError(null)
     try {
       const detail = await divergentRound(sessionId, roundDetail.current_round.id)
       setRoundDetail(detail)
+
+      const nonScribeIds = detail.agents_attached
+        .filter(a => !a.is_scribe)
+        .map(a => a.id)
+      setStreamingAgentIds(new Set(nonScribeIds))
+
+      const cleanup = streamDivergent(sessionId, detail.current_round.id, {
+        onAgentStart: () => {},
+        onToken: (data) => {
+          setStreamContents(prev => ({
+            ...prev,
+            [data.agent_id]: (prev[data.agent_id] || '') + data.token,
+          }))
+        },
+        onAgentDone: (data) => {
+          setStreamContents(prev => {
+            const content = prev[data.agent_id] || ''
+            if (content) {
+              setRoundDetail(current => {
+                if (!current) return current
+                const updatedMessages = current.current_round.public_messages.map(m =>
+                  m.agent_id === data.agent_id ? { ...m, content } : m
+                )
+                return {
+                  ...current,
+                  current_round: { ...current.current_round, public_messages: updatedMessages },
+                }
+              })
+            }
+            const { [data.agent_id]: _, ...rest } = prev
+            return rest
+          })
+          setStreamingAgentIds(prev => {
+            const next = new Set(prev)
+            next.delete(data.agent_id)
+            return next
+          })
+        },
+        onError: (data) => {
+          setStreamingAgentIds(prev => {
+            const next = new Set(prev)
+            next.delete(data.agent_id)
+            return next
+          })
+        },
+        onComplete: () => {
+          cleanupRef.current = null
+          setStreamingAgentIds(new Set())
+          setStreamContents({})
+          setLoading(false)
+          load()
+        },
+      })
+
+      cleanupRef.current = cleanup
     } catch (e: any) {
       setError(e.message)
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleStartNextRound = async () => {
@@ -62,7 +131,6 @@ export function useSession(sessionId: number) {
     try {
       if (!roundDetail) return
       await endRound(sessionId, roundDetail.current_round.id)
-      // Reload to get scribe summary
       await load()
     } catch (e: any) {
       setError(e.message)
@@ -82,8 +150,11 @@ export function useSession(sessionId: number) {
     setRespondingAgentId(null)
   }
 
+  const isStreaming = streamingAgentIds.size > 0
+
   return {
     roundDetail, respondingAgentId, loading, error,
+    streamingAgentIds, streamContents, isStreaming,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention,
   }
