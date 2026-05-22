@@ -307,7 +307,7 @@ def mention_agent(session_id: int, data: MentionRequest, db: Session = Depends(g
     if not round_obj:
         raise HTTPException(404, "Round not found")
 
-    for agent_id in data.agent_ids:
+    for agent_id in set(data.agent_ids):
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
             continue
