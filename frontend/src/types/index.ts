@@ -56,3 +56,19 @@ export interface RoundDetailType {
   current_round: RoundType;
   agents_attached: { id: number; name: string; is_scribe: boolean }[];
 }
+
+export interface NewAgentInput {
+  name: string;
+  personality: string;
+  system_prompt: string;
+  api_base_url: string;
+  api_key: string;
+  model_name: string;
+  avatar_url: string;
+}
+
+export interface NewSessionInput {
+  topic: string;
+  status: string;
+  current_round: number;
+}
