@@ -161,10 +161,24 @@ def mention_agent(session_id: int, data: MentionRequest, db: Session = Depends(g
 
 
 @router.post("/end-round", response_model=RoundDetailResponse)
-def end_round(session_id: int, data: EndRoundRequest, db: Session = Depends(get_db)):
-    """End the round — triggers scribe summary generation in later tasks."""
+async def end_round(session_id: int, data: EndRoundRequest, db: Session = Depends(get_db)):
+    """End the round and generate scribe summary."""
     session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == data.round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
+
+    from services.scribe import generate_scribe_summary
+    await generate_scribe_summary(db, session, round_obj)
+    db.commit()
+
     return _get_round_detail(db, session, round_obj)
+
+
+@router.post("/final-report")
+async def final_report(session_id: int, db: Session = Depends(get_db)):
+    """Generate the final synthesis report for the entire session."""
+    session = _get_session(session_id, db)
+    from services.scribe import generate_final_report
+    report = await generate_final_report(db, session)
+    return {"report": report}
