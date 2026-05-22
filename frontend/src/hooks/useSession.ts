@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { db } from '../db/db';
 import {
   getSession, getCurrentRound, getRoundMessages, getRoundThreads, getThreadMessages,
   getSessionAgents, getAgent, createRound, createMessage, updateMessage,
   updateRound, createThread, createThreadMessage, updateThreadMessage,
   getRounds, updateSession,
+  deleteSession as deleteSessionFromDb,
 } from '../db/helpers';
 import { streamAgentResponse, callAgent } from '../llm/stream';
 import { buildSystemPrompt, buildDivergentContext } from '../llm/prompt';
@@ -17,6 +19,13 @@ export function useSession(sessionId: number) {
   const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set());
   const [streamContents, setStreamContents] = useState<Record<number, string>>({});
 
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cancel all in-flight LLM requests on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
   const isStreaming = streamingAgentIds.size > 0;
 
   async function buildRoundDetail(
@@ -27,9 +36,12 @@ export function useSession(sessionId: number) {
     const sid = session.id!;
 
     const saRecords = await getSessionAgents(sid);
+    const saAgentIds = saRecords.map(sa => sa.agent_id);
+    const saAgents = saAgentIds.length > 0 ? await db.agents.bulkGet(saAgentIds) : [];
+    const saAgentMap = new Map(saAgents.filter(Boolean).map(a => [a!.id!, a!]));
     const agentsAttached: { id: number; name: string; is_scribe: boolean }[] = [];
     for (const sa of saRecords) {
-      const agent = await getAgent(sa.agent_id);
+      const agent = saAgentMap.get(sa.agent_id);
       if (agent) {
         agentsAttached.push({ id: agent.id!, name: agent.name, is_scribe: sa.is_scribe });
       }
@@ -170,7 +182,10 @@ export function useSession(sessionId: number) {
       setStreamingAgentIds(new Set(agentIds));
       setStreamContents(Object.fromEntries(agentIds.map(id => [id, ''])));
 
-      // Launch all agent streams in parallel
+      // Launch all agent streams in parallel with AbortController
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
       const promises = entries.map(async ({ agentId, messageId }) => {
         try {
           const agent = await getAgent(agentId);
@@ -181,7 +196,7 @@ export function useSession(sessionId: number) {
             'Provide your unique perspective on this topic. Be creative and specific.',
           );
           let full = '';
-          for await (const token of streamAgentResponse(agent, prompt)) {
+          for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
             full += token;
             setStreamContents(prev => ({ ...prev, [agentId]: full }));
           }
@@ -229,14 +244,17 @@ export function useSession(sessionId: number) {
           'Respond to the human\'s private question thoughtfully.',
         );
 
-        // Fire-and-forget streaming per agent
+        // Fire-and-forget streaming per agent with AbortController
+        const abortController = new AbortController();
+        abortRef.current = abortController;
+
         setStreamingAgentIds(prev => new Set(prev).add(agentId));
         setStreamContents(prev => ({ ...prev, [agentId]: '' }));
 
         (async () => {
           try {
             let full = '';
-            for await (const token of streamAgentResponse(agent, prompt)) {
+            for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
               full += token;
               setStreamContents(prev => ({ ...prev, [agentId]: full }));
             }
@@ -342,10 +360,26 @@ export function useSession(sessionId: number) {
     await handleCreateRound('');
   };
 
+  const handleDeleteSession = async () => {
+    await deleteSessionFromDb(sessionId);
+  };
+
+  const fetchSummaries = useCallback(async () => {
+    const rounds = await getRounds(sessionId);
+    return rounds
+      .filter(r => r.scribe_summary)
+      .map(r => ({
+        round_number: r.round_number,
+        summary: r.scribe_summary,
+        created_at: r.created_at,
+      }));
+  }, [sessionId]);
+
   return {
     roundDetail, respondingAgentId, loading, error,
     streamingAgentIds, streamContents, isStreaming,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession,
+    handleDeleteSession, fetchSummaries,
   };
 }
