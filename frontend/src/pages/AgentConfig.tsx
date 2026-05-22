@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listAgents, createAgent, updateAgent, deleteAgent } from '../api/client'
+import { listAgents, createAgent, updateAgent, deleteAgent, testAgent } from '../api/client'
 import type { AgentType } from '../types'
 
 const emptyForm = {
@@ -12,6 +12,8 @@ export default function AgentConfig() {
   const [agents, setAgents] = useState<AgentType[]>([])
   const [editing, setEditing] = useState<Partial<AgentType> | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [testingId, setTestingId] = useState<number | null>(null)
 
   const load = async () => {
     try { setAgents(await listAgents()) } catch (e) { console.error(e) }
@@ -38,6 +40,17 @@ export default function AgentConfig() {
       await deleteAgent(id)
       load()
     } catch (e) { console.error(e) }
+  }
+
+  const handleTest = async (id: number) => {
+    setTestingId(id)
+    try {
+      const result = await testAgent(id)
+      setTestResult(result)
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message })
+    }
+    setTestingId(null)
   }
 
   return (
@@ -110,6 +123,15 @@ export default function AgentConfig() {
                 {a.personality && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{a.personality}</div>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => handleTest(a.id)} disabled={testingId === a.id}
+                  style={{
+                    padding: '4px 12px',
+                    background: testingId === a.id ? '#D1D5DB' : 'var(--success)',
+                    color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                    cursor: testingId === a.id ? 'not-allowed' : 'pointer', fontSize: 13,
+                  }}>
+                  {testingId === a.id ? 'Testing...' : 'Test'}
+                </button>
                 <button onClick={() => { setEditing({...a}); setEditId(a.id) }}
                   style={{ padding: '4px 12px', background: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 13 }}>
                   Edit
@@ -121,6 +143,45 @@ export default function AgentConfig() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {testResult && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.4)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setTestResult(null)}>
+          <div style={{
+            background: '#fff', padding: 24, borderRadius: 'var(--radius-lg)',
+            maxWidth: 520, width: '90%', boxShadow: 'var(--shadow-md)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: testResult.success ? 'var(--success)' : 'var(--danger)',
+                display: 'inline-block',
+              }} />
+              <strong style={{ fontSize: 15 }}>
+                {testResult.success ? 'Connection Successful' : 'Connection Failed'}
+              </strong>
+            </div>
+            <div style={{
+              fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto',
+              background: 'var(--bg)', padding: 12, borderRadius: 'var(--radius)',
+              fontFamily: 'monospace', lineHeight: 1.5, color: 'var(--text-primary)',
+            }}>
+              {testResult.message}
+            </div>
+            <button onClick={() => setTestResult(null)}
+              style={{
+                marginTop: 12, padding: '8px 20px', background: 'var(--primary)',
+                color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                cursor: 'pointer', fontSize: 14, fontWeight: 500,
+              }}>
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -5,7 +5,7 @@ from models import Session as SessionModel, Round, Message, Thread, ThreadMessag
 from schemas import (
     RoundResponse, RoundDetailResponse, SessionResponse,
     MessageResponse, ThreadResponse, ThreadMessageResponse,
-    DivergentRequest, MentionRequest, EndRoundRequest,
+    DivergentRequest, MentionRequest, StartRoundRequest, EndRoundRequest,
 )
 
 router = APIRouter(prefix="/api/sessions/{session_id}/rounds", tags=["rounds"])
@@ -86,7 +86,7 @@ def list_rounds(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/start", response_model=RoundDetailResponse, status_code=201)
-def start_new_round(session_id: int, db: Session = Depends(get_db)):
+def start_new_round(session_id: int, data: StartRoundRequest, db: Session = Depends(get_db)):
     session = _get_session(session_id, db)
     if session.status == "completed":
         raise HTTPException(400, "Session is already completed")
@@ -95,6 +95,17 @@ def start_new_round(session_id: int, db: Session = Depends(get_db)):
     round_obj = Round(session_id=session.id, round_number=next_round_num)
     db.add(round_obj)
     session.current_round = next_round_num
+    db.flush()
+
+    if data.initial_message:
+        human_msg = Message(
+            round_id=round_obj.id,
+            agent_id=None,
+            is_human=True,
+            content=data.initial_message,
+        )
+        db.add(human_msg)
+
     db.commit()
     db.refresh(round_obj)
 

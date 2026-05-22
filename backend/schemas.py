@@ -115,5 +115,14 @@ class MentionRequest(BaseModel):
     question: str
 
 
+class StartRoundRequest(BaseModel):
+    initial_message: str = ""
+
+
 class EndRoundRequest(BaseModel):
     round_id: int
+
+
+class AgentTestResponse(BaseModel):
+    success: bool
+    message: str

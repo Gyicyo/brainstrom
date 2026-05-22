@@ -55,3 +55,12 @@ def end_session(session_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(session)
     return session
+
+
+@router.delete("/{session_id}", status_code=204)
+def delete_session(session_id: int, db: Session = Depends(get_db)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+    db.delete(session)
+    db.commit()

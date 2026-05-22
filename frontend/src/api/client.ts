@@ -23,6 +23,8 @@ export const updateAgent = (id: number, data: Partial<AgentType>) =>
   fetchJSON<AgentType>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteAgent = (id: number) =>
   fetchJSON<void>(`/agents/${id}`, { method: 'DELETE' });
+export const testAgent = (id: number) =>
+  fetchJSON<{ success: boolean; message: string }>(`/agents/${id}/test`, { method: 'POST' });
 
 // Sessions
 export const listSessions = () => fetchJSON<SessionType[]>('/sessions');
@@ -30,10 +32,15 @@ export const createSession = (data: { topic: string; agent_ids: number[]; scribe
   fetchJSON<SessionType>('/sessions', { method: 'POST', body: JSON.stringify(data) });
 export const endSession = (id: number) =>
   fetchJSON<SessionType>(`/sessions/${id}/end`, { method: 'POST' });
+export const deleteSession = (id: number) =>
+  fetchJSON<void>(`/sessions/${id}`, { method: 'DELETE' });
 
 // Rounds
-export const startNewRound = (sessionId: number) =>
-  fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/start`, { method: 'POST' });
+export const startNewRound = (sessionId: number, initialMessage?: string) =>
+  fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/start`, {
+    method: 'POST',
+    body: JSON.stringify({ initial_message: initialMessage ?? '' }),
+  });
 export const getCurrentRound = (sessionId: number) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/current`);
 export const divergentRound = (sessionId: number, roundId: number) =>

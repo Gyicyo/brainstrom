@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Agent
-from schemas import AgentCreate, AgentUpdate, AgentResponse
+from schemas import AgentCreate, AgentUpdate, AgentResponse, AgentTestResponse
+from services.agent_proxy import call_agent, build_system_prompt
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -49,3 +50,22 @@ def delete_agent(agent_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Agent not found")
     db.delete(agent)
     db.commit()
+
+
+@router.post("/{agent_id}/test", response_model=AgentTestResponse)
+async def test_agent(agent_id: int, db: Session = Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    system_prompt = build_system_prompt(
+        agent,
+        "",
+        "Respond to the following greeting with a brief introduction of yourself.",
+    )
+
+    try:
+        response = await call_agent(agent, system_prompt, max_tokens=256)
+        return AgentTestResponse(success=True, message=response[:500])
+    except Exception as e:
+        return AgentTestResponse(success=False, message=str(e)[:500])

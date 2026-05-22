@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSession } from '../hooks/useSession'
-import { endSession } from '../api/client'
+import { endSession, deleteSession } from '../api/client'
 import ChatRoom from '../components/ChatRoom'
 
 function getPhaseLabel(roundDetail: NonNullable<ReturnType<typeof useSession>['roundDetail']>): string {
@@ -18,13 +18,24 @@ export default function SessionView() {
 
   const {
     roundDetail, respondingAgentId, loading, error,
-    handleStartRound, handleEndRound, handleMention,
+    handleCreateRound, handleStartDivergent, handleStartNextRound,
+    handleEndRound, handleMention,
   } = useSession(sessionId)
 
   const handleEndSession = async () => {
     if (!confirm('End this session and generate final report?')) return
     try {
       await endSession(sessionId)
+      navigate('/')
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this session and all its data?')) return
+    try {
+      await deleteSession(sessionId)
       navigate('/')
     } catch (e) {
       console.error(e)
@@ -55,14 +66,24 @@ export default function SessionView() {
             </div>
           )}
         </div>
-        <button onClick={handleEndSession}
-          style={{
-            padding: '8px 16px', background: 'var(--danger)', color: '#fff',
-            border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
-            fontSize: 13, fontWeight: 500, flexShrink: 0,
-          }}>
-          End Session
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={handleDelete}
+            style={{
+              padding: '8px 16px', background: 'transparent', color: 'var(--text-secondary)',
+              border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer',
+              fontSize: 13, fontWeight: 500, flexShrink: 0,
+            }}>
+            Delete
+          </button>
+          <button onClick={handleEndSession}
+            style={{
+              padding: '8px 16px', background: 'var(--danger)', color: '#fff',
+              border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
+              fontSize: 13, fontWeight: 500, flexShrink: 0,
+            }}>
+            End Session
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -80,7 +101,9 @@ export default function SessionView() {
         <ChatRoom
           roundDetail={roundDetail}
           onSendMention={handleMention}
-          onStartRound={handleStartRound}
+          onCreateRound={handleCreateRound}
+          onStartDivergent={handleStartDivergent}
+          onStartNextRound={handleStartNextRound}
           onEndRound={handleEndRound}
           respondingAgentId={respondingAgentId}
           loading={loading}

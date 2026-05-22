@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listSessions, createSession, listAgents } from '../api/client'
+import { listSessions, createSession, deleteSession, listAgents } from '../api/client'
 import type { SessionType, AgentType } from '../types'
 
 export default function Dashboard() {
@@ -42,6 +42,17 @@ export default function Dashboard() {
     setSelectedAgents(prev =>
       prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
     )
+  }
+
+  const handleDelete = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
+    if (!confirm('Delete this session and all its data? This cannot be undone.')) return
+    try {
+      await deleteSession(id)
+      load()
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   return (
@@ -166,8 +177,17 @@ export default function Dashboard() {
                   Round {s.current_round} · {s.status}
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {new Date(s.created_at).toLocaleDateString()}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {new Date(s.created_at).toLocaleDateString()}
+                </div>
+                <button onClick={(e) => handleDelete(e, s.id)}
+                  style={{
+                    padding: '4px 8px', background: 'transparent', color: 'var(--text-muted)',
+                    border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 12,
+                  }}>
+                  Delete
+                </button>
               </div>
             </div>
           ))}

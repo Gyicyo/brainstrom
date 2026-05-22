@@ -23,15 +23,34 @@ export function useSession(sessionId: number) {
 
   useEffect(() => { load() }, [load])
 
-  const handleStartRound = async () => {
+  const handleCreateRound = async (initialMessage: string) => {
     setLoading(true)
     try {
-      const detail = await startNewRound(sessionId)
+      const detail = await startNewRound(sessionId, initialMessage)
       setRoundDetail(detail)
-      // Trigger divergent phase — each agent says something
-      setRespondingAgentId(null)
-      const divergentDetail = await divergentRound(sessionId, detail.current_round.id)
-      setRoundDetail(divergentDetail)
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setLoading(false)
+  }
+
+  const handleStartDivergent = async () => {
+    if (!roundDetail) return
+    setLoading(true)
+    try {
+      const detail = await divergentRound(sessionId, roundDetail.current_round.id)
+      setRoundDetail(detail)
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setLoading(false)
+  }
+
+  const handleStartNextRound = async () => {
+    setLoading(true)
+    try {
+      const detail = await startNewRound(sessionId, '')
+      setRoundDetail(detail)
     } catch (e: any) {
       setError(e.message)
     }
@@ -65,6 +84,7 @@ export function useSession(sessionId: number) {
 
   return {
     roundDetail, respondingAgentId, loading, error,
-    handleStartRound, handleEndRound, handleMention,
+    handleCreateRound, handleStartDivergent, handleStartNextRound,
+    handleEndRound, handleMention,
   }
 }
