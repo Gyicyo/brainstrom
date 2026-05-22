@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -247,31 +248,48 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
                 agent_tasks.append((sa.agent, msg, prompt))
 
     async def event_generator():
-        from database import SessionLocal
-        gen_db = SessionLocal()
-        try:
-            for agent, msg, prompt in agent_tasks:
-                try:
-                    yield f"event: agent_start\ndata: {json.dumps({'agent_id': agent.id, 'agent_name': agent.name, 'message_id': msg.id})}\n\n"
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        n_tasks = len(agent_tasks)
 
-                    full_content = ""
-                    async for token in stream_agent(agent, prompt):
-                        full_content += token
-                        yield f"event: token\ndata: {json.dumps({'agent_id': agent.id, 'token': token})}\n\n"
+        async def run_agent(agent, msg, prompt):
+            """Run one agent, pushing events to shared queue."""
+            from database import SessionLocal
+            gen_db = SessionLocal()
+            try:
+                await queue.put(("event", "agent_start", {"agent_id": agent.id, "agent_name": agent.name, "message_id": msg.id}))
 
-                    # Persist full content to DB
-                    db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
-                    if db_msg:
-                        db_msg.content = full_content
-                        gen_db.commit()
+                full_content = ""
+                async for token in stream_agent(agent, prompt):
+                    full_content += token
+                    await queue.put(("event", "token", {"agent_id": agent.id, "token": token}))
 
-                    yield f"event: agent_done\ndata: {json.dumps({'agent_id': agent.id})}\n\n"
-                except Exception as e:
-                    yield f"event: agent_error\ndata: {json.dumps({'agent_id': agent.id, 'error': str(e)})}\n\n"
+                # Persist full content to DB
+                db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
+                if db_msg:
+                    db_msg.content = full_content
+                    gen_db.commit()
 
-            yield f"event: complete\ndata: {{}}\n\n"
-        finally:
-            gen_db.close()
+                await queue.put(("event", "agent_done", {"agent_id": agent.id}))
+            except Exception as e:
+                await queue.put(("event", "agent_error", {"agent_id": agent.id, "error": str(e)}))
+            finally:
+                gen_db.close()
+                await queue.put(("sentinel", None, None))
+
+        # Launch all agent tasks concurrently
+        for agent, msg, prompt in agent_tasks:
+            asyncio.create_task(run_agent(agent, msg, prompt))
+
+        # Read from queue until all agents finish
+        done = 0
+        while done < n_tasks:
+            typ, event_type, data = await queue.get()
+            if typ == "sentinel":
+                done += 1
+                continue
+            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+        yield "event: complete\ndata: {}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
