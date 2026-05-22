@@ -48,10 +48,10 @@ export const divergentRound = (sessionId: number, roundId: number) =>
     method: 'POST',
     body: JSON.stringify({ round_id: roundId }),
   });
-export const mentionAgent = (sessionId: number, roundId: number, agentId: number, question: string) =>
+export const mentionAgent = (sessionId: number, roundId: number, agentIds: number[], question: string) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/mention`, {
     method: 'POST',
-    body: JSON.stringify({ round_id: roundId, agent_id: agentId, question }),
+    body: JSON.stringify({ round_id: roundId, agent_ids: agentIds, question }),
   });
 export const endRound = (sessionId: number, roundId: number) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/end-round`, {
@@ -113,3 +113,8 @@ export function streamDivergent(
 
   return () => { clearTimeout(timeout); es.close(); };
 }
+
+export const fetchSummaries = (sessionId: number) =>
+  fetchJSON<{ round_number: number; summary: string; created_at: string }[]>(
+    `/sessions/${sessionId}/rounds/summaries`
+  );

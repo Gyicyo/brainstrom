@@ -145,11 +145,11 @@ export function useSession(sessionId: number) {
     setLoading(false)
   }
 
-  const handleMention = async (agentId: number, question: string) => {
-    if (!roundDetail) return
-    setRespondingAgentId(agentId)
+  const handleMention = async (agentIds: number[], question: string) => {
+    if (!roundDetail || agentIds.length === 0) return
+    setRespondingAgentId(agentIds[0])
     try {
-      const detail = await mentionAgent(sessionId, roundDetail.current_round.id, agentId, question)
+      const detail = await mentionAgent(sessionId, roundDetail.current_round.id, agentIds, question)
       setRoundDetail(detail)
     } catch (e: any) {
       setError(e.message)
