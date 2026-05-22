@@ -1,183 +1,351 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react';
 import {
-  getCurrentRound, startNewRound, endRound, divergentRound, mentionAgent,
-  streamAgentMessage,
-} from '../api/client'
-import type { RoundDetailType } from '../types'
+  getSession, getCurrentRound, getRoundMessages, getRoundThreads, getThreadMessages,
+  getSessionAgents, getAgent, createRound, createMessage, updateMessage,
+  updateRound, createThread, createThreadMessage, updateThreadMessage,
+  getRounds, updateSession,
+} from '../db/helpers';
+import { streamAgentResponse, callAgent } from '../llm/stream';
+import { buildSystemPrompt, buildDivergentContext } from '../llm/prompt';
+import type { RoundDetailType } from '../types';
 
 export function useSession(sessionId: number) {
-  const [roundDetail, setRoundDetail] = useState<RoundDetailType | null>(null)
-  const [respondingAgentId, setRespondingAgentId] = useState<number | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set())
-  const [streamContents, setStreamContents] = useState<Record<number, string>>({})
+  const [roundDetail, setRoundDetail] = useState<RoundDetailType | null>(null);
+  const [respondingAgentId, setRespondingAgentId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set());
+  const [streamContents, setStreamContents] = useState<Record<number, string>>({});
 
-  // Store streaming cleanup function for unmount
-  const cleanupRef = useRef<(() => void) | null>(null)
+  const isStreaming = streamingAgentIds.size > 0;
+
+  async function buildRoundDetail(
+    session: { id?: number; topic: string; status: string; current_round: number; created_at: string },
+    round: { id?: number; session_id: number; round_number: number; scribe_summary: string; created_at: string },
+  ): Promise<RoundDetailType> {
+    const rid = round.id!;
+    const sid = session.id!;
+
+    const saRecords = await getSessionAgents(sid);
+    const agentsAttached: { id: number; name: string; is_scribe: boolean }[] = [];
+    for (const sa of saRecords) {
+      const agent = await getAgent(sa.agent_id);
+      if (agent) {
+        agentsAttached.push({ id: agent.id!, name: agent.name, is_scribe: sa.is_scribe });
+      }
+    }
+
+    const msgRecords = await getRoundMessages(rid);
+    const publicMessages = msgRecords.map(m => {
+      let agentName = '';
+      if (m.agent_id != null) {
+        agentName = agentsAttached.find(a => a.id === m.agent_id)?.name || '';
+      }
+      return {
+        id: m.id!,
+        agent_id: m.agent_id,
+        agent_name: agentName,
+        is_human: m.is_human,
+        content: m.content,
+        created_at: m.created_at,
+      };
+    });
+
+    const threadRecords = await getRoundThreads(rid);
+    const privateThreads = [];
+    for (const t of threadRecords) {
+      const agentName = agentsAttached.find(a => a.id === t.agent_id)?.name || '';
+      const tmRecords = await getThreadMessages(t.id!);
+      const tmList = tmRecords.map(tm => ({
+        id: tm.id!,
+        is_human: tm.is_human,
+        content: tm.content,
+        created_at: tm.created_at,
+      }));
+      privateThreads.push({
+        id: t.id!,
+        agent_id: t.agent_id,
+        agent_name: agentName,
+        messages: tmList,
+        created_at: t.created_at,
+      });
+    }
+
+    return {
+      session: {
+        id: sid,
+        topic: session.topic,
+        status: session.status,
+        current_round: session.current_round,
+        created_at: session.created_at,
+      },
+      current_round: {
+        id: rid,
+        round_number: round.round_number,
+        scribe_summary: round.scribe_summary || '',
+        public_messages: publicMessages,
+        private_threads: privateThreads,
+        created_at: round.created_at,
+      },
+      agents_attached: agentsAttached,
+    };
+  }
+
+  async function buildDetail(sid: number, roundNum: number): Promise<RoundDetailType | null> {
+    const session = await getSession(sid);
+    if (!session) return null;
+    const round = await getCurrentRound(sid, roundNum);
+    if (!round) return null;
+    return buildRoundDetail(session, round);
+  }
 
   const load = useCallback(async () => {
     try {
-      setError(null)
-      const detail = await getCurrentRound(sessionId)
-      setRoundDetail(detail)
-    } catch (e: any) {
-      setRoundDetail(null)
+      setError(null);
+      const session = await getSession(sessionId);
+      if (!session) { setRoundDetail(null); return; }
+      const round = await getCurrentRound(sessionId, session.current_round);
+      if (!round) { setRoundDetail(null); return; }
+      setRoundDetail(await buildRoundDetail(session, round));
+    } catch {
+      setRoundDetail(null);
     }
-  }, [sessionId])
+  }, [sessionId]);
 
-  useEffect(() => { load() }, [load])
-
-  // Cleanup EventSource on unmount
-  useEffect(() => {
-    return () => {
-      cleanupRef.current?.()
-      cleanupRef.current = null
-    }
-  }, [])
+  useEffect(() => { load(); }, [load]);
 
   const handleCreateRound = async (initialMessage: string) => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const detail = await startNewRound(sessionId, initialMessage)
-      setRoundDetail(detail)
-    } catch (e: any) {
-      setError(e.message)
-    }
-    setLoading(false)
-  }
+      const session = await getSession(sessionId);
+      if (!session) throw new Error('Session not found');
 
-  const handleStartDivergent = async () => {
-    if (!roundDetail) return
-    setLoading(true)
-    setError(null)
-    try {
-      const detail = await divergentRound(sessionId, roundDetail.current_round.id)
-      setRoundDetail(detail)
+      const nextNum = session.current_round + 1;
+      const rid = await createRound({ session_id: sessionId, round_number: nextNum, scribe_summary: '' });
+      await updateSession(sessionId, { current_round: nextNum });
 
-      // Find the just-created empty agent messages
-      const agentMsgs = detail.current_round.public_messages.filter(
-        m => !m.is_human && m.agent_id !== null
-      )
-      const agentIds = new Set(agentMsgs.map(m => m.agent_id!).filter(Boolean))
-      setStreamingAgentIds(agentIds)
-
-      const cleanups: (() => void)[] = []
-      let done = 0
-      const total = agentMsgs.length
-
-      for (const msg of agentMsgs) {
-        if (msg.agent_id === null) continue
-        const cleanup = streamAgentMessage(sessionId, detail.current_round.id, msg.id, {
-          onAgentStart: (data) => {
-            setStreamContents(prev => ({ ...prev, [data.agent_id]: '' }))
-          },
-          onToken: (data) => {
-            setStreamContents(prev => ({
-              ...prev,
-              [data.agent_id]: (prev[data.agent_id] || '') + data.token,
-            }))
-          },
-          onAgentDone: (data) => {
-            setStreamContents(prev => {
-              const content = prev[data.agent_id] || ''
-              if (content) {
-                setRoundDetail(current => {
-                  if (!current) return current
-                  const updatedMessages = current.current_round.public_messages.map(m =>
-                    m.agent_id === data.agent_id ? { ...m, content } : m
-                  )
-                  return {
-                    ...current,
-                    current_round: { ...current.current_round, public_messages: updatedMessages },
-                  }
-                })
-              }
-              const { [data.agent_id]: _, ...rest } = prev
-              return rest
-            })
-            setStreamingAgentIds(prev => {
-              const next = new Set(prev)
-              next.delete(data.agent_id)
-              return next
-            })
-          },
-          onAgentError: (data) => {
-            setStreamingAgentIds(prev => {
-              const next = new Set(prev)
-              next.delete(data.agent_id)
-              return next
-            })
-          },
-          onConnectionError: (_messageId, err) => {
-            setStreamingAgentIds(prev => {
-              const next = new Set(prev)
-              next.delete(msg.agent_id!)
-              return next
-            })
-          },
-          onComplete: () => {
-            done++
-            if (done >= total) {
-              cleanupRef.current = null
-              setStreamingAgentIds(new Set())
-              setStreamContents({})
-              setLoading(false)
-              load()
-            }
-          },
-        })
-        cleanups.push(cleanup)
+      if (initialMessage) {
+        await createMessage({ round_id: rid, agent_id: null, is_human: true, content: initialMessage });
       }
 
-      cleanupRef.current = () => cleanups.forEach(c => c())
+      const detail = await buildDetail(sessionId, nextNum);
+      setRoundDetail(detail);
     } catch (e: any) {
-      setError(e.message)
-      setLoading(false)
+      setError(e.message);
     }
-  }
+    setLoading(false);
+  };
 
-  const handleStartNextRound = async () => {
-    setLoading(true)
+  const handleStartDivergent = async () => {
+    if (!roundDetail) return;
+    setLoading(true);
+    setError(null);
     try {
-      const detail = await startNewRound(sessionId, '')
-      setRoundDetail(detail)
-    } catch (e: any) {
-      setError(e.message)
-    }
-    setLoading(false)
-  }
+      const roundId = roundDetail.current_round.id;
+      const nonScribeAgents = roundDetail.agents_attached.filter(a => !a.is_scribe);
 
-  const handleEndRound = async () => {
-    setLoading(true)
-    try {
-      if (!roundDetail) return
-      await endRound(sessionId, roundDetail.current_round.id)
-      await load()
+      // Create empty messages for each agent
+      const entries: { agentId: number; messageId: number }[] = [];
+      for (const a of nonScribeAgents) {
+        const agent = await getAgent(a.id);
+        if (!agent) continue;
+        const mid = await createMessage({
+          round_id: roundId,
+          agent_id: a.id,
+          is_human: false,
+          content: '',
+        });
+        entries.push({ agentId: a.id, messageId: mid });
+      }
+
+      // Refresh detail so UI shows empty agent messages
+      const freshDetail = await buildDetail(sessionId, roundDetail.current_round.round_number);
+      setRoundDetail(freshDetail);
+
+      // Build context
+      const context = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
+
+      // Mark all non-scribe agents as streaming
+      const agentIds = nonScribeAgents.map(a => a.id);
+      setStreamingAgentIds(new Set(agentIds));
+      setStreamContents(Object.fromEntries(agentIds.map(id => [id, ''])));
+
+      // Launch all agent streams in parallel
+      const promises = entries.map(async ({ agentId, messageId }) => {
+        try {
+          const agent = await getAgent(agentId);
+          if (!agent) return;
+          const prompt = buildSystemPrompt(
+            agent,
+            context,
+            'Provide your unique perspective on this topic. Be creative and specific.',
+          );
+          let full = '';
+          for await (const token of streamAgentResponse(agent, prompt)) {
+            full += token;
+            setStreamContents(prev => ({ ...prev, [agentId]: full }));
+          }
+          await updateMessage(messageId, { content: full });
+        } finally {
+          setStreamContents(prev => {
+            const { [agentId]: _, ...rest } = prev;
+            return rest;
+          });
+          setStreamingAgentIds(prev => {
+            const next = new Set(prev);
+            next.delete(agentId);
+            return next;
+          });
+        }
+      });
+
+      await Promise.allSettled(promises);
+      setLoading(false);
+      load();
     } catch (e: any) {
-      setError(e.message)
+      setError(e.message);
+      setLoading(false);
     }
-    setLoading(false)
-  }
+  };
 
   const handleMention = async (agentIds: number[], question: string) => {
-    if (!roundDetail || agentIds.length === 0) return
-    setRespondingAgentId(agentIds[0])
+    if (!roundDetail || agentIds.length === 0) return;
+    setRespondingAgentId(agentIds[0]);
     try {
-      const detail = await mentionAgent(sessionId, roundDetail.current_round.id, agentIds, question)
-      setRoundDetail(detail)
-    } catch (e: any) {
-      setError(e.message)
-    }
-    setRespondingAgentId(null)
-  }
+      const roundId = roundDetail.current_round.id;
+      const context = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
 
-  const isStreaming = streamingAgentIds.size > 0
+      for (const agentId of agentIds) {
+        const agent = await getAgent(agentId);
+        if (!agent) continue;
+
+        const tid = await createThread({ round_id: roundId, agent_id: agentId });
+        await createThreadMessage({ thread_id: tid, is_human: true, content: question });
+        const tmid = await createThreadMessage({ thread_id: tid, is_human: false, content: '' });
+
+        const prompt = buildSystemPrompt(
+          agent,
+          context + `\n\n## Private Question\n${question}`,
+          'Respond to the human\'s private question thoughtfully.',
+        );
+
+        // Fire-and-forget streaming per agent
+        setStreamingAgentIds(prev => new Set(prev).add(agentId));
+        setStreamContents(prev => ({ ...prev, [agentId]: '' }));
+
+        (async () => {
+          try {
+            let full = '';
+            for await (const token of streamAgentResponse(agent, prompt)) {
+              full += token;
+              setStreamContents(prev => ({ ...prev, [agentId]: full }));
+            }
+            await updateThreadMessage(tmid, { content: full });
+          } finally {
+            setStreamContents(prev => {
+              const { [agentId]: _, ...rest } = prev;
+              return rest;
+            });
+            setStreamingAgentIds(prev => {
+              const next = new Set(prev);
+              next.delete(agentId);
+              return next;
+            });
+            load();
+          }
+        })();
+      }
+
+      // Refresh to show threads immediately
+      const freshDetail = await buildDetail(sessionId, roundDetail.current_round.round_number);
+      setRoundDetail(freshDetail);
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setRespondingAgentId(null);
+  };
+
+  const handleEndRound = async () => {
+    if (!roundDetail) return;
+    setLoading(true);
+    try {
+      const roundId = roundDetail.current_round.id;
+      const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
+      if (!scribeAgentInfo) throw new Error('No scribe agent configured');
+
+      const scribeAgent = await getAgent(scribeAgentInfo.id);
+      if (!scribeAgent) throw new Error('Scribe agent not found');
+
+      const messages = await getRoundMessages(roundId);
+      const threads = await getRoundThreads(roundId);
+
+      let discussionText = messages.map(m => {
+        const name = m.is_human ? 'Human'
+          : roundDetail?.agents_attached.find(a => a.id === m.agent_id)?.name || 'Unknown';
+        return `${name}: ${m.content}`;
+      }).join('\n\n');
+
+      for (const t of threads) {
+        const tms = await getThreadMessages(t.id!);
+        const agentName = roundDetail?.agents_attached.find(a => a.id === t.agent_id)?.name || 'Unknown';
+        discussionText += '\n\n' + tms.map(tm => {
+          const name = tm.is_human ? 'Human' : agentName;
+          return `${name}: ${tm.content}`;
+        }).join('\n');
+      }
+
+      const prompt = buildSystemPrompt(
+        scribeAgent,
+        discussionText,
+        'Summarize this round of discussion concisely. Capture key points, agreements, and disagreements. Be neutral.',
+      );
+      const summary = await callAgent(scribeAgent, prompt);
+
+      await updateRound(roundId, { scribe_summary: summary });
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setLoading(false);
+  };
+
+  const handleEndSession = async () => {
+    if (!roundDetail) return '';
+    try {
+      const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
+      if (!scribeAgentInfo) throw new Error('No scribe agent configured');
+
+      const scribeAgent = await getAgent(scribeAgentInfo.id);
+      if (!scribeAgent) throw new Error('Scribe agent not found');
+
+      const rounds = await getRounds(sessionId);
+      const summaries = rounds.filter(r => r.scribe_summary).map(r =>
+        `## Round ${r.round_number}\n${r.scribe_summary}`
+      ).join('\n\n');
+
+      const prompt = buildSystemPrompt(
+        scribeAgent,
+        summaries,
+        'Synthesize all round summaries into a comprehensive final report. Identify themes, conclusions, and open questions.',
+      );
+      const report = await callAgent(scribeAgent, prompt);
+
+      await updateSession(sessionId, { status: 'completed' });
+      return report;
+    } catch (e: any) {
+      setError(e.message);
+      return '';
+    }
+  };
+
+  const handleStartNextRound = async () => {
+    await handleCreateRound('');
+  };
 
   return {
     roundDetail, respondingAgentId, loading, error,
     streamingAgentIds, streamContents, isStreaming,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
-    handleEndRound, handleMention,
-  }
+    handleEndRound, handleMention, handleEndSession,
+  };
 }
