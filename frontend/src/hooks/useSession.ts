@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getCurrentRound, startNewRound, endRound, divergentRound, mentionAgent,
-  streamDivergent,
+  streamAgentMessage,
 } from '../api/client'
 import type { RoundDetailType } from '../types'
 
@@ -55,67 +55,76 @@ export function useSession(sessionId: number) {
       const detail = await divergentRound(sessionId, roundDetail.current_round.id)
       setRoundDetail(detail)
 
-      const nonScribeIds = detail.agents_attached
-        .filter(a => !a.is_scribe)
-        .map(a => a.id)
-      setStreamingAgentIds(new Set(nonScribeIds))
+      // Find the just-created empty agent messages
+      const agentMsgs = detail.current_round.public_messages.filter(
+        m => !m.is_human && m.agent_id !== null
+      )
+      const agentIds = new Set(agentMsgs.map(m => m.agent_id!).filter(Boolean))
+      setStreamingAgentIds(agentIds)
 
-      const cleanup = streamDivergent(sessionId, detail.current_round.id, {
-        onAgentStart: () => {},
-        onToken: (data) => {
-          setStreamContents(prev => ({
-            ...prev,
-            [data.agent_id]: (prev[data.agent_id] || '') + data.token,
-          }))
-        },
-        onAgentDone: (data) => {
-          setStreamContents(prev => {
-            const content = prev[data.agent_id] || ''
-            if (content) {
-              setRoundDetail(current => {
-                if (!current) return current
-                const updatedMessages = current.current_round.public_messages.map(m =>
-                  m.agent_id === data.agent_id ? { ...m, content } : m
-                )
-                return {
-                  ...current,
-                  current_round: { ...current.current_round, public_messages: updatedMessages },
-                }
-              })
+      const cleanups: (() => void)[] = []
+      let done = 0
+      const total = agentMsgs.length
+
+      for (const msg of agentMsgs) {
+        if (msg.agent_id === null) continue
+        const cleanup = streamAgentMessage(sessionId, detail.current_round.id, msg.id, {
+          onAgentStart: () => {},
+          onToken: (data) => {
+            setStreamContents(prev => ({
+              ...prev,
+              [data.agent_id]: (prev[data.agent_id] || '') + data.token,
+            }))
+          },
+          onAgentDone: (data) => {
+            setStreamContents(prev => {
+              const content = prev[data.agent_id] || ''
+              if (content) {
+                setRoundDetail(current => {
+                  if (!current) return current
+                  const updatedMessages = current.current_round.public_messages.map(m =>
+                    m.agent_id === data.agent_id ? { ...m, content } : m
+                  )
+                  return {
+                    ...current,
+                    current_round: { ...current.current_round, public_messages: updatedMessages },
+                  }
+                })
+              }
+              const { [data.agent_id]: _, ...rest } = prev
+              return rest
+            })
+            setStreamingAgentIds(prev => {
+              const next = new Set(prev)
+              next.delete(data.agent_id)
+              return next
+            })
+          },
+          onAgentError: (data) => {
+            setStreamingAgentIds(prev => {
+              const next = new Set(prev)
+              next.delete(data.agent_id)
+              return next
+            })
+          },
+          onConnectionError: (_messageId, err) => {
+            // Per-agent connection error — don't stop other agents
+          },
+          onComplete: () => {
+            done++
+            if (done >= total) {
+              cleanupRef.current = null
+              setStreamingAgentIds(new Set())
+              setStreamContents({})
+              setLoading(false)
+              load()
             }
-            const { [data.agent_id]: _, ...rest } = prev
-            return rest
-          })
-          setStreamingAgentIds(prev => {
-            const next = new Set(prev)
-            next.delete(data.agent_id)
-            return next
-          })
-        },
-        onAgentError: (data) => {
-          setStreamingAgentIds(prev => {
-            const next = new Set(prev)
-            next.delete(data.agent_id)
-            return next
-          })
-        },
-        onConnectionError: (err) => {
-          cleanupRef.current = null
-          setStreamingAgentIds(new Set())
-          setStreamContents({})
-          setError(err)
-          setLoading(false)
-        },
-        onComplete: () => {
-          cleanupRef.current = null
-          setStreamingAgentIds(new Set())
-          setStreamContents({})
-          setLoading(false)
-          load()
-        },
-      })
+          },
+        })
+        cleanups.push(cleanup)
+      }
 
-      cleanupRef.current = cleanup
+      cleanupRef.current = () => cleanups.forEach(c => c())
     } catch (e: any) {
       setError(e.message)
       setLoading(false)

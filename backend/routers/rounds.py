@@ -1,4 +1,3 @@
-import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -213,86 +212,49 @@ def divergent_round(session_id: int, data: DivergentRequest, db: Session = Depen
     return _get_round_detail(db, session, round_obj)
 
 
-@router.get("/{round_id}/stream-divergent")
-async def stream_divergent(session_id: int, round_id: int, db: Session = Depends(get_db)):
-    """SSE endpoint: stream each non-scribe agent's LLM response token-by-token."""
+@router.get("/{round_id}/messages/{message_id}/stream")
+async def stream_message(session_id: int, round_id: int, message_id: int, db: Session = Depends(get_db)):
+    """SSE endpoint: stream a single agent's LLM response token-by-token."""
     session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
 
-    # Pre-fetch all data while the DB session is active
-    session_agents = db.query(SessionAgent).options(
-        selectinload(SessionAgent.agent)
-    ).filter(
-        SessionAgent.session_id == session.id,
-        SessionAgent.is_scribe == False,
-    ).all()
+    msg = db.query(Message).options(
+        selectinload(Message.agent)
+    ).filter(Message.id == message_id, Message.round_id == round_id).first()
+    if not msg:
+        raise HTTPException(404, "Message not found in this round")
+    if not msg.agent:
+        raise HTTPException(400, "Message has no associated agent")
 
     context = _build_divergent_context(session, db, round_obj)
+    prompt = build_system_prompt(
+        msg.agent, context,
+        "Provide your unique perspective on this topic. Be creative and specific.",
+    )
 
-    # Pre-fetch all messages for this round (avoids N+1 in agent loop)
-    existing_messages = db.query(Message).filter(
-        Message.round_id == round_id
-    ).order_by(Message.created_at).all()
-
-    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-
-    agent_tasks = []
-    for sa in session_agents:
-        if sa.agent:
-            msg = next((m for m in existing_messages if m.agent_id == sa.agent.id), None)
-            if msg:
-                prompt = build_system_prompt(
-                    sa.agent, context,
-                    "Provide your unique perspective on this topic. Be creative and specific.",
-                )
-                agent_tasks.append((sa.agent, msg, prompt))
-
-    n_tasks = len(agent_tasks)
-
-    async def run_agent(agent, msg, prompt):
-        """Run one agent, pushing events to shared queue."""
+    async def event_generator():
         from database import SessionLocal
         gen_db = SessionLocal()
         try:
-            await queue.put(("agent_start", {"agent_id": agent.id, "agent_name": agent.name, "message_id": msg.id}))
+            yield f"event: agent_start\ndata: {json.dumps({'agent_id': msg.agent.id, 'agent_name': msg.agent.name, 'message_id': msg.id})}\n\n"
 
             full_content = ""
-            async for token in stream_agent(agent, prompt):
+            async for token in stream_agent(msg.agent, prompt):
                 full_content += token
-                await queue.put(("token", {"agent_id": agent.id, "token": token}))
+                yield f"event: token\ndata: {json.dumps({'agent_id': msg.agent.id, 'token': token})}\n\n"
 
             db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
             if db_msg:
                 db_msg.content = full_content
                 gen_db.commit()
 
-            await queue.put(("agent_done", {"agent_id": agent.id}))
+            yield f"event: agent_done\ndata: {json.dumps({'agent_id': msg.agent.id})}\n\n"
         except Exception as e:
-            await queue.put(("agent_error", {"agent_id": agent.id, "error": str(e)}))
+            yield f"event: agent_error\ndata: {json.dumps({'agent_id': msg.agent.id, 'error': str(e)})}\n\n"
         finally:
-            await queue.put(("sentinel", None))
             gen_db.close()
-
-    # Create tasks OUTSIDE the generator — they run on the event loop
-    # that exists in the endpoint function, not inside Starlette's anyio
-    tasks = [asyncio.create_task(run_agent(agent, msg, prompt))
-             for agent, msg, prompt in agent_tasks]
-
-    async def event_generator():
-        done = 0
-        try:
-            while done < n_tasks:
-                typ, data = await queue.get()
-                if typ == "sentinel":
-                    done += 1
-                    continue
-                yield f"event: {typ}\ndata: {json.dumps(data)}\n\n"
-            yield "event: complete\ndata: {}\n\n"
-        finally:
-            for t in tasks:
-                t.cancel()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
