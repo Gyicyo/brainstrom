@@ -1,1 +1,7 @@
 backend/brainstorm.db
+__pycache__/
+*.pyc
+.claude/worktrees/
+node_modules/
+dist/
+.env

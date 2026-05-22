@@ -29,7 +29,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
     return agent
 
 
-@router.put("/{agent_id}", response_model=AgentResponse)
+@router.patch("/{agent_id}", response_model=AgentResponse)
 def update_agent(agent_id: int, data: AgentUpdate, db: Session = Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
