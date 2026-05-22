@@ -230,13 +230,15 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
 
     context = _build_divergent_context(session, db, round_obj)
 
+    # Pre-fetch all messages for this round (avoids N+1 in agent loop)
+    existing_messages = db.query(Message).filter(
+        Message.round_id == round_id
+    ).order_by(Message.created_at).all()
+
     agent_tasks = []
     for sa in session_agents:
         if sa.agent:
-            msg = db.query(Message).filter(
-                Message.round_id == round_id,
-                Message.agent_id == sa.agent.id
-            ).first()
+            msg = next((m for m in existing_messages if m.agent_id == sa.agent.id), None)
             if msg:
                 prompt = build_system_prompt(
                     sa.agent, context,
