@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import RoundDivider from './RoundDivider'
 import AgentStatusBar from './AgentStatusBar'
-import type { RoundDetailType, MessageType } from '../types'
+import type { RoundDetailType } from '../types'
 
 interface Props {
   roundDetail: RoundDetailType | null;
@@ -24,10 +24,17 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
 
   if (!roundDetail) {
     return (
-      <div style={{ textAlign: 'center', padding: 48 }}>
-        <p style={{ color: '#999', marginBottom: 16 }}>No active round. Start one to begin brainstorming!</p>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        height: '100%', gap: 16,
+      }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: 15 }}>No active round. Start one to begin brainstorming!</p>
         <button onClick={onStartRound} disabled={loading}
-          style={{ padding: '10px 24px', background: loading ? '#ccc' : '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer' }}>
+          style={{
+            padding: '10px 28px', background: loading ? '#D1D5DB' : 'var(--primary)',
+            color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+            cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+          }}>
           {loading ? 'Starting...' : 'Start Round 1'}
         </button>
       </div>
@@ -40,16 +47,19 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
   const allMessages = current_round.public_messages
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <AgentStatusBar agents={agents_attached} respondingAgentId={respondingAgentId} />
 
+      {/* Scrollable message area - fills remaining space */}
       <div style={{
-        background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        minHeight: 400, maxHeight: 500, overflowY: 'auto', padding: 16, marginBottom: 16,
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
+        padding: 16, marginBottom: 12,
       }}>
         <RoundDivider roundNumber={current_round.round_number} />
         {allMessages.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#999', padding: 40 }}>
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40, fontSize: 14 }}>
             Waiting for agents to respond...
           </p>
         ) : (
@@ -59,8 +69,13 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
         )}
 
         {current_round.private_threads.map(t => (
-          <div key={t.id} style={{ marginLeft: 24, borderLeft: '3px solid #ff9800', paddingLeft: 12, marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: '#ff9800', marginBottom: 8 }}>Private thread with {t.agent_name}</div>
+          <div key={t.id} style={{
+            marginLeft: 24, borderLeft: '3px solid var(--accent)', paddingLeft: 12,
+            marginBottom: 16, marginTop: 16,
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 8, fontWeight: 500 }}>
+              Private thread with {t.agent_name}
+            </div>
             {t.messages.map(tm => (
               <MessageBubble key={tm.id} message={{
                 id: tm.id, agent_id: null, agent_name: tm.is_human ? 'You' : t.agent_name,
@@ -71,9 +86,16 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
         ))}
 
         {current_round.scribe_summary && (
-          <div style={{ marginTop: 16, padding: 12, background: '#f5f5f5', borderRadius: 8 }}>
-            <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Scribe Summary</div>
-            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{current_round.scribe_summary}</div>
+          <div style={{
+            marginTop: 16, padding: 14, background: 'var(--primary-light)',
+            borderRadius: 'var(--radius)', borderLeft: '3px solid var(--primary)',
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--primary)', marginBottom: 6, fontWeight: 600 }}>
+              Scribe Summary
+            </div>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+              {current_round.scribe_summary}
+            </div>
           </div>
         )}
 
@@ -81,9 +103,13 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
       </div>
 
       {/* @mention input */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexShrink: 0 }}>
         <select value={selectedAgent || ''} onChange={e => setSelectedAgent(Number(e.target.value) || null)}
-          style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }}>
+          style={{
+            padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)',
+            minWidth: 160, outline: 'none',
+          }}>
           <option value="">@mention an agent...</option>
           {nonScribeAgents.map(a => (
             <option key={a.id} value={a.id}>{a.name}</option>
@@ -97,7 +123,11 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
             }
           }}
           placeholder="Ask a follow-up..."
-          style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }}
+          style={{
+            flex: 1, padding: '8px 12px', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
+            background: 'var(--surface)', color: 'var(--text-primary)',
+          }}
         />
         <button onClick={() => {
           if (selectedAgent && mentionText.trim()) {
@@ -105,19 +135,33 @@ export default function ChatRoom({ roundDetail, onSendMention, onStartRound, onE
             setMentionText('')
           }
         }}
-          style={{ padding: '8px 16px', background: '#ff9800', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          style={{
+            padding: '8px 20px', background: 'var(--accent)', color: '#fff',
+            border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
+            fontSize: 14, fontWeight: 500, flexShrink: 0,
+          }}>
           @Send
         </button>
       </div>
 
       {/* Round controls */}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
         <button onClick={onEndRound} disabled={loading}
-          style={{ padding: '8px 16px', background: loading ? '#ccc' : '#4caf50', color: '#fff', border: 'none', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer' }}>
+          style={{
+            padding: '8px 20px',
+            background: loading ? '#D1D5DB' : 'var(--accent)',
+            color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+            cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+          }}>
           End Round & Summarize
         </button>
         <button onClick={onStartRound} disabled={loading}
-          style={{ padding: '8px 16px', background: loading ? '#ccc' : '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer' }}>
+          style={{
+            padding: '8px 20px',
+            background: loading ? '#D1D5DB' : 'var(--primary)',
+            color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+            cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
+          }}>
           Start Next Round
         </button>
       </div>

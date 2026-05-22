@@ -6,11 +6,11 @@ export default function RoundDivider({ roundNumber }: Props) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 16, margin: '24px 0',
-      color: '#999', fontSize: 13,
+      color: 'var(--primary)', fontSize: 14,
     }}>
-      <div style={{ flex: 1, height: 1, background: '#e0e0e0' }} />
-      <span style={{ fontWeight: 500 }}>Round {roundNumber}</span>
-      <div style={{ flex: 1, height: 1, background: '#e0e0e0' }} />
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      <span style={{ fontWeight: 600, letterSpacing: '0.02em' }}>Round {roundNumber}</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   )
 }

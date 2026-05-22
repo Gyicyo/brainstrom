@@ -43,45 +43,48 @@ export default function AgentConfig() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ margin: 0 }}>Agent Configuration</h1>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Agent Configuration</h1>
         <button onClick={() => { setEditing({...emptyForm}); setEditId(null) }}
-          style={{ padding: '8px 16px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>
           + Add Agent
         </button>
       </div>
 
       {editing && (
-        <div style={{ background: '#fff', padding: 24, borderRadius: 8, marginBottom: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <h3 style={{ margin: '0 0 16px' }}>{editId ? 'Edit Agent' : 'New Agent'}</h3>
+        <div style={{
+          background: 'var(--surface)', padding: 24, borderRadius: 'var(--radius-lg)',
+          marginBottom: 24, boxShadow: 'var(--shadow)', border: '1px solid var(--border)',
+        }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{editId ? 'Edit Agent' : 'New Agent'}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <input placeholder="Name" value={editing.name || ''}
               onChange={e => setEditing({ ...editing, name: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
             <textarea placeholder="Personality / Role Description" value={editing.personality || ''}
               onChange={e => setEditing({ ...editing, personality: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4, minHeight: 60 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none', minHeight: 60 }} />
             <textarea placeholder="System Prompt" value={editing.system_prompt || ''}
               onChange={e => setEditing({ ...editing, system_prompt: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4, minHeight: 80 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none', minHeight: 80 }} />
             <input placeholder="Avatar URL (optional)" value={editing.avatar_url || ''}
               onChange={e => setEditing({ ...editing, avatar_url: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
             <input placeholder="API Base URL" value={editing.api_base_url || ''}
               onChange={e => setEditing({ ...editing, api_base_url: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
             <input placeholder="API Key" type="password" value={editing.api_key || ''}
               onChange={e => setEditing({ ...editing, api_key: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
             <input placeholder="Model Name" value={editing.model_name || ''}
               onChange={e => setEditing({ ...editing, model_name: e.target.value })}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 4 }} />
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={handleSave}
-                style={{ padding: '8px 16px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>
                 Save
               </button>
               <button onClick={() => { setEditing(null); setEditId(null) }}
-                style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                style={{ padding: '8px 20px', background: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14 }}>
                 Cancel
               </button>
             </div>
@@ -90,26 +93,29 @@ export default function AgentConfig() {
       )}
 
       {agents.length === 0 ? (
-        <p style={{ color: '#999', textAlign: 'center', padding: 48 }}>No agents configured. Add one to start!</p>
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 48, fontSize: 14 }}>
+          No agents configured. Add one to start!
+        </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {agents.map(a => (
             <div key={a.id} style={{
-              background: '#fff', padding: 16, borderRadius: 8,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'var(--surface)', padding: '16px 20px', borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             }}>
               <div>
-                <strong>{a.name}</strong>
-                <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{a.model_name}</div>
-                {a.personality && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{a.personality}</div>}
+                <strong style={{ fontSize: 15 }}>{a.name}</strong>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>{a.model_name}</div>
+                {a.personality && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{a.personality}</div>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => { setEditing({...a}); setEditId(a.id) }}
-                  style={{ padding: '4px 12px', background: '#eee', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                  style={{ padding: '4px 12px', background: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 13 }}>
                   Edit
                 </button>
                 <button onClick={() => handleDelete(a.id)}
-                  style={{ padding: '4px 12px', background: '#f44336', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                  style={{ padding: '4px 12px', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 13 }}>
                   Delete
                 </button>
               </div>

@@ -3,6 +3,14 @@ import { useSession } from '../hooks/useSession'
 import { endSession } from '../api/client'
 import ChatRoom from '../components/ChatRoom'
 
+function getPhaseLabel(roundDetail: NonNullable<ReturnType<typeof useSession>['roundDetail']>): string {
+  const round = roundDetail.current_round
+  if (round.scribe_summary) return `Round ${round.round_number} · Ended`
+  if (round.private_threads.length > 0) return `Round ${round.round_number} · Mention Phase`
+  if (round.public_messages.length > 0) return `Round ${round.round_number} · Divergent Phase`
+  return `Round ${round.round_number} · Starting`
+}
+
 export default function SessionView() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -24,38 +32,60 @@ export default function SessionView() {
   }
 
   const session = roundDetail?.session
+  const phaseLabel = roundDetail ? getPhaseLabel(roundDetail) : null
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 100px)' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        marginBottom: 16, flexShrink: 0,
+      }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 20 }}>{session?.topic || 'Brainstorm Session'}</h1>
-          {session && (
-            <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-              Round {session.current_round} · {session.status}
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+            {session?.topic || 'Brainstorm Session'}
+          </h1>
+          {phaseLabel && (
+            <div style={{
+              fontSize: 13, color: 'var(--primary)', marginTop: 4, fontWeight: 500,
+              display: 'inline-block', background: 'var(--primary-light)',
+              padding: '2px 10px', borderRadius: 'var(--radius-full)',
+            }}>
+              {phaseLabel}
             </div>
           )}
         </div>
         <button onClick={handleEndSession}
-          style={{ padding: '8px 16px', background: '#f44336', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          style={{
+            padding: '8px 16px', background: 'var(--danger)', color: '#fff',
+            border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
+            fontSize: 13, fontWeight: 500, flexShrink: 0,
+          }}>
           End Session
         </button>
       </div>
 
       {error && (
-        <div style={{ padding: 12, background: '#ffebee', color: '#c62828', borderRadius: 4, marginBottom: 16 }}>
+        <div style={{
+          padding: 12, background: '#FEF2F2', color: 'var(--danger)',
+          borderRadius: 'var(--radius)', marginBottom: 16,
+          border: '1px solid #FECACA', fontSize: 14, flexShrink: 0,
+        }}>
           {error}
         </div>
       )}
 
-      <ChatRoom
-        roundDetail={roundDetail}
-        onSendMention={handleMention}
-        onStartRound={handleStartRound}
-        onEndRound={handleEndRound}
-        respondingAgentId={respondingAgentId}
-        loading={loading}
-      />
+      {/* ChatRoom fills remaining height */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ChatRoom
+          roundDetail={roundDetail}
+          onSendMention={handleMention}
+          onStartRound={handleStartRound}
+          onEndRound={handleEndRound}
+          respondingAgentId={respondingAgentId}
+          loading={loading}
+        />
+      </div>
     </div>
   )
 }

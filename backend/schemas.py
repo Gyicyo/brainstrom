@@ -42,6 +42,7 @@ class AgentResponse(BaseModel):
 class SessionCreate(BaseModel):
     topic: str = ""
     agent_ids: list[int] = []
+    scribe_agent_id: int
 
 
 class SessionResponse(BaseModel):

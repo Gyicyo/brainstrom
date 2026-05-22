@@ -5,12 +5,21 @@ import AgentConfig from './pages/AgentConfig'
 
 function App() {
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
-      <nav style={{ background: '#fff', padding: '12px 24px', borderBottom: '1px solid #ddd', display: 'flex', gap: 24 }}>
-        <Link to="/" style={{ fontWeight: 'bold', textDecoration: 'none', color: '#333' }}>Brainstorm</Link>
-        <Link to="/agents" style={{ textDecoration: 'none', color: '#666' }}>Agent Config</Link>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <nav style={{
+        background: 'var(--surface)', padding: '12px 24px',
+        borderBottom: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-sm)',
+        display: 'flex', gap: 24, alignItems: 'center',
+      }}>
+        <Link to="/" style={{ fontWeight: 700, textDecoration: 'none', color: 'var(--primary)', fontSize: 16 }}>
+          Brainstorm
+        </Link>
+        <Link to="/agents" style={{ textDecoration: 'none', color: 'var(--text-secondary)', fontSize: 14 }}>
+          Agent Config
+        </Link>
       </nav>
-      <main style={{ maxWidth: 960, margin: '24px auto', padding: '0 16px' }}>
+      <main style={{ maxWidth: 1200, margin: '24px auto', padding: '0 16px' }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/session/:id" element={<SessionView />} />

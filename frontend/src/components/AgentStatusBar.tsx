@@ -14,23 +14,26 @@ export default function AgentStatusBar({ agents, respondingAgentId }: Props) {
 
   return (
     <div style={{
-      display: 'flex', gap: 8, padding: '8px 12px',
-      background: '#fafafa', borderRadius: 8, marginBottom: 16,
-      flexWrap: 'wrap',
+      display: 'flex', gap: 8, padding: '10px 12px',
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)', marginBottom: 16,
+      flexWrap: 'wrap', minHeight: 20,
     }}>
       {nonScribe.map(a => {
         const isResponding = a.id === respondingAgentId
         return (
           <div key={a.id} style={{
             display: 'flex', alignItems: 'center', gap: 6,
-            padding: '4px 10px', borderRadius: 12, fontSize: 12,
-            background: isResponding ? '#fff3e0' : '#f0f0f0',
-            color: isResponding ? '#e65100' : '#666',
+            padding: '4px 10px', borderRadius: 'var(--radius-full)', fontSize: 12,
+            background: isResponding ? 'var(--accent-light)' : 'var(--bg)',
+            color: isResponding ? 'var(--accent)' : 'var(--text-secondary)',
+            transition: 'all 0.15s',
           }}>
             <span style={{
               width: 8, height: 8, borderRadius: '50%',
-              background: isResponding ? '#ff9800' : '#4caf50',
+              background: isResponding ? 'var(--accent)' : 'var(--success)',
               display: 'inline-block',
+              transition: 'background 0.15s',
             }} />
             {a.name}
             {isResponding && ' (responding...)'}

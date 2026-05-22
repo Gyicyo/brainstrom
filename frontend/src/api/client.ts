@@ -26,7 +26,7 @@ export const deleteAgent = (id: number) =>
 
 // Sessions
 export const listSessions = () => fetchJSON<SessionType[]>('/sessions');
-export const createSession = (data: { topic: string; agent_ids: number[] }) =>
+export const createSession = (data: { topic: string; agent_ids: number[]; scribe_agent_id: number }) =>
   fetchJSON<SessionType>('/sessions', { method: 'POST', body: JSON.stringify(data) });
 export const endSession = (id: number) =>
   fetchJSON<SessionType>(`/sessions/${id}/end`, { method: 'POST' });

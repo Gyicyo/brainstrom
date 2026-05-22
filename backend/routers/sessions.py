@@ -18,12 +18,20 @@ def create_session(data: SessionCreate, db: Session = Depends(get_db)):
     db.add(session)
     db.flush()
 
+    if data.scribe_agent_id not in data.agent_ids:
+        db.rollback()
+        raise HTTPException(400, "scribe_agent_id must be one of agent_ids")
+
     for agent_id in data.agent_ids:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
             db.rollback()
             raise HTTPException(404, f"Agent with id {agent_id} not found")
-        db.add(SessionAgent(session_id=session.id, agent_id=agent_id))
+        db.add(SessionAgent(
+            session_id=session.id,
+            agent_id=agent_id,
+            is_scribe=(agent_id == data.scribe_agent_id),
+        ))
 
     db.commit()
     db.refresh(session)
