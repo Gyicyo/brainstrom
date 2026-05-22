@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -247,7 +248,10 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
                 )
                 agent_tasks.append((sa.agent, msg, prompt))
 
+    logger = logging.getLogger(__name__)
+
     async def event_generator():
+        print(f"[DIAG] gen start, n_tasks={len(agent_tasks)}", flush=True)
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         n_tasks = len(agent_tasks)
 
@@ -277,24 +281,25 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
                 gen_db.close()
 
         # Launch all agent tasks concurrently
-        tasks = []
-        for agent, msg, prompt in agent_tasks:
-            tasks.append(asyncio.create_task(run_agent(agent, msg, prompt)))
+        tasks = [asyncio.create_task(run_agent(agent, msg, prompt))
+                 for agent, msg, prompt in agent_tasks]
 
-        try:
-            # Read from queue until all agents finish
-            done = 0
-            while done < n_tasks:
-                typ, event_type, data = await queue.get()
-                if typ == "sentinel":
-                    done += 1
-                    continue
-                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+        # Let the tasks start executing
+        await asyncio.sleep(0)
 
-            yield "event: complete\ndata: {}\n\n"
-        finally:
-            for t in tasks:
-                t.cancel()
+        # Read from queue until all agents finish
+        done = 0
+        while done < n_tasks:
+            typ, event_type, data = await queue.get()
+            if typ == "sentinel":
+                done += 1
+                continue
+            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+        yield "event: complete\ndata: {}\n\n"
+
+        for t in tasks:
+            t.cancel()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
