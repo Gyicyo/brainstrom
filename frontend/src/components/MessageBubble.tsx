@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import AgentAvatar from './AgentAvatar'
 import type { MessageType } from '../types'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 
 interface Props {
   message: MessageType;
@@ -33,11 +36,10 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
           background: 'var(--bubble-ai-bg)', color: 'var(--text-primary)',
           border, fontSize: 14, lineHeight: 1.6,
           boxShadow: 'var(--bubble-shadow)',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          cursor: showEllipsis ? 'pointer' : 'default',
+          wordBreak: 'break-word',
           minHeight: isThinking ? 40 : undefined,
           display: 'flex', alignItems: isThinking ? 'center' : undefined,
-        }} onClick={() => showEllipsis && setExpanded(true)}>
+        }}>
           {isThinking ? (
             <span className="thinking-dots">
               <span className="thinking-dot" />
@@ -50,17 +52,23 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
           ) : streamingContent !== undefined ? (
             displayContent || ' '
           ) : (
-            <>
-              {expanded ? message.content : (showEllipsis ? `${preview}...` : message.content)}
-              {showEllipsis && (
-                <div style={{
-                  marginTop: 8, fontSize: 12, color: 'var(--primary)', fontWeight: 500,
-                  display: 'flex', alignItems: 'center', gap: 4,
-                }}>
-                  Click to expand <span>▼</span>
-                </div>
-              )}
-            </>
+              <div className="message-content" style={{ maxWidth: '100%', overflowX: 'auto' }}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                >
+                  {expanded ? message.content : (showEllipsis ? `${preview}...` : message.content)}
+                </ReactMarkdown>
+                {showEllipsis && (
+                  <div style={{
+                    marginTop: 8, fontSize: 12, color: 'var(--primary)', fontWeight: 500,
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    cursor: 'pointer',
+                  }} onClick={(e) => { e.stopPropagation(); setExpanded(true) }}>
+                    Click to expand <span>▼</span>
+                  </div>
+                )}
+              </div>
           )}
         </div>
       </div>
