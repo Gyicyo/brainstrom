@@ -273,23 +273,28 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
             except Exception as e:
                 await queue.put(("event", "agent_error", {"agent_id": agent.id, "error": str(e)}))
             finally:
-                gen_db.close()
                 await queue.put(("sentinel", None, None))
+                gen_db.close()
 
         # Launch all agent tasks concurrently
+        tasks = []
         for agent, msg, prompt in agent_tasks:
-            asyncio.create_task(run_agent(agent, msg, prompt))
+            tasks.append(asyncio.create_task(run_agent(agent, msg, prompt)))
 
-        # Read from queue until all agents finish
-        done = 0
-        while done < n_tasks:
-            typ, event_type, data = await queue.get()
-            if typ == "sentinel":
-                done += 1
-                continue
-            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+        try:
+            # Read from queue until all agents finish
+            done = 0
+            while done < n_tasks:
+                typ, event_type, data = await queue.get()
+                if typ == "sentinel":
+                    done += 1
+                    continue
+                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-        yield "event: complete\ndata: {}\n\n"
+            yield "event: complete\ndata: {}\n\n"
+        finally:
+            for t in tasks:
+                t.cancel()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
