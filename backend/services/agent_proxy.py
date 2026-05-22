@@ -1,7 +1,10 @@
 import json
+import logging
 
 import httpx
 from models import Agent
+
+logger = logging.getLogger(__name__)
 
 
 def build_system_prompt(agent: Agent, context: str, task_description: str) -> str:
@@ -22,7 +25,7 @@ def _build_messages(system_prompt: str) -> list[dict]:
     ]
 
 
-async def call_agent(agent: Agent, system_prompt: str, max_tokens: int = 1024) -> str:
+async def call_agent(agent: Agent, system_prompt: str, max_tokens: int = 4096) -> str:
     """Call an agent's configured API endpoint with the given prompt (OpenAI-compatible)."""
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
@@ -42,13 +45,13 @@ async def call_agent(agent: Agent, system_prompt: str, max_tokens: int = 1024) -
         return data["choices"][0]["message"]["content"]
 
 
-async def stream_agent(agent: Agent, system_prompt: str, max_tokens: int = 1024):
+async def stream_agent(agent: Agent, system_prompt: str, max_tokens: int = 4096):
     """Call an agent's API with streaming, yielding content tokens as they arrive.
 
     Yields:
         str: each content token/delta from the streaming response.
     """
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         async with client.stream(
             "POST",
             f"{agent.api_base_url.rstrip('/')}/chat/completions",
@@ -64,6 +67,7 @@ async def stream_agent(agent: Agent, system_prompt: str, max_tokens: int = 1024)
             },
         ) as resp:
             resp.raise_for_status()
+            finish_reason = None
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -73,8 +77,12 @@ async def stream_agent(agent: Agent, system_prompt: str, max_tokens: int = 1024)
                 try:
                     chunk = json.loads(payload)
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    finish_reason = chunk.get("choices", [{}])[0].get("finish_reason") or finish_reason
                     content = delta.get("content", "")
                     if content:
                         yield content
                 except json.JSONDecodeError:
                     continue
+
+        if finish_reason == "length":
+            logger.warning("Agent %s response truncated by max_tokens", agent.id)
