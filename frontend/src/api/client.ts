@@ -64,8 +64,9 @@ interface StreamCallbacks {
   onAgentStart: (data: { agent_id: number; agent_name: string; message_id: number }) => void;
   onToken: (data: { agent_id: number; token: string }) => void;
   onAgentDone: (data: { agent_id: number }) => void;
-  onError: (data: { agent_id: number; error: string }) => void;
+  onAgentError: (data: { agent_id: number; error: string }) => void;
   onComplete: () => void;
+  onConnectionError: (error: string) => void;
 }
 
 export function streamDivergent(
@@ -73,6 +74,12 @@ export function streamDivergent(
   callbacks: StreamCallbacks,
 ): () => void {
   const es = new EventSource(`/api/sessions/${sessionId}/rounds/${roundId}/stream-divergent`);
+
+  // Connection timeout — EventSource can hang silently if server doesn't respond
+  const timeout = setTimeout(() => {
+    es.close();
+    callbacks.onConnectionError('Connection timed out. Is the backend running?');
+  }, 10000);
 
   es.addEventListener('agent_start', (e) => {
     callbacks.onAgentStart(JSON.parse(e.data));
@@ -84,16 +91,25 @@ export function streamDivergent(
     callbacks.onAgentDone(JSON.parse(e.data));
   });
   es.addEventListener('agent_error', (e) => {
-    callbacks.onError(JSON.parse(e.data));
+    callbacks.onAgentError(JSON.parse(e.data));
   });
   es.addEventListener('complete', () => {
+    clearTimeout(timeout);
     es.close();
     callbacks.onComplete();
   });
+
+  // EventSource fires onerror when it can't connect (404, network error, etc.)
+  // We also need to handle the case where the first event succeeds
+  // (clear the timeout) but onerror fires later (connection drops mid-stream).
+  // A single successful event means the connection is alive.
+  es.addEventListener('agent_start', () => clearTimeout(timeout), { once: true });
+
   es.onerror = () => {
+    clearTimeout(timeout);
     es.close();
-    callbacks.onError({ agent_id: -1, error: 'Connection lost' });
+    callbacks.onConnectionError('Failed to connect to streaming endpoint');
   };
 
-  return () => es.close();
+  return () => { clearTimeout(timeout); es.close(); };
 }

@@ -92,12 +92,19 @@ export function useSession(sessionId: number) {
             return next
           })
         },
-        onError: (data) => {
+        onAgentError: (data) => {
           setStreamingAgentIds(prev => {
             const next = new Set(prev)
             next.delete(data.agent_id)
             return next
           })
+        },
+        onConnectionError: (err) => {
+          cleanupRef.current = null
+          setStreamingAgentIds(new Set())
+          setStreamContents({})
+          setError(err)
+          setLoading(false)
         },
         onComplete: () => {
           cleanupRef.current = null
