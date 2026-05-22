@@ -301,24 +301,23 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
 
 @router.post("/mention", response_model=RoundDetailResponse)
 def mention_agent(session_id: int, data: MentionRequest, db: Session = Depends(get_db)):
-    """Human @mentions an agent, starting a private thread."""
+    """Human @mentions one or more agents, starting private threads."""
     session = _get_session(session_id, db)
     round_obj = db.query(Round).filter(Round.id == data.round_id).first()
     if not round_obj:
         raise HTTPException(404, "Round not found")
 
-    agent = db.query(Agent).filter(Agent.id == data.agent_id).first()
-    if not agent:
-        raise HTTPException(404, "Agent not found")
+    for agent_id in data.agent_ids:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            continue
+        thread = Thread(round_id=round_obj.id, agent_id=agent.id)
+        db.add(thread)
+        db.flush()
+        human_msg = ThreadMessage(thread_id=thread.id, is_human=True, content=data.question)
+        db.add(human_msg)
 
-    thread = Thread(round_id=round_obj.id, agent_id=agent.id)
-    db.add(thread)
-    db.flush()
-
-    human_msg = ThreadMessage(thread_id=thread.id, is_human=True, content=data.question)
-    db.add(human_msg)
     db.commit()
-
     return _get_round_detail(db, session, round_obj)
 
 
