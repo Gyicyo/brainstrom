@@ -69,15 +69,17 @@ When the human ends the entire session, the Scribe generates a comprehensive fin
 
 ## Page Structure (UI)
 
-The web application has three main views:
+The web application has three main views, designed as a familiar chat-room interface (akin to QQ-style messaging):
 
 1. **Dashboard / Session List** — create new sessions, browse past sessions
 2. **Session View** — the main brainstorming interface
-   - Round timeline (public discussions)
-   - Agent status indicators (which agents are waiting, which are responding)
-   - Input area (type topic, @-mention agents, control flow commands)
-   - Scribe summary panel
-3. **Agent Configuration** — CRUD interface for agent definitions
+   - Chat-style message list showing all public agent statements and the scribe's round summaries
+   - Agent/human avatars are user-configurable (custom images or initials)
+   - Agent status indicators (online/waiting/responding)
+   - Input area: type topic text, @-mention specific agents for follow-ups, control flow commands
+   - Visual separation between public round discussion and private @-mention threads
+   - Round boundary indicators so users can see where one round ends and the next begins
+3. **Agent Configuration** — CRUD interface for agent definitions with avatar upload
 
 ## Data Model
 
