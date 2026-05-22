@@ -6,7 +6,7 @@ import type { RoundDetailType } from '../types'
 
 interface Props {
   roundDetail: RoundDetailType | null;
-  onSendMention: (agentId: number, question: string) => void;
+  onSendMention: (agentIds: number[], question: string) => void;
   onCreateRound: (initialMessage: string) => void;
   onStartDivergent: () => void;
   onStartNextRound: () => void;
@@ -25,8 +25,28 @@ export default function ChatRoom({
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [mentionText, setMentionText] = useState('')
-  const [selectedAgent, setSelectedAgent] = useState<number | null>(null)
+  const [selectedAgentIds, setSelectedAgentIds] = useState<number[]>([])
   const [initialContext, setInitialContext] = useState('')
+
+  const toggleAgent = (id: number) => {
+    setSelectedAgentIds(prev =>
+      prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
+    )
+  }
+
+  const selectAll = () => {
+    setSelectedAgentIds(prev =>
+      prev.length === nonScribeAgents.length ? [] : nonScribeAgents.map(a => a.id)
+    )
+  }
+
+  const sendMention = () => {
+    if (selectedAgentIds.length > 0 && mentionText.trim() && !isStreaming) {
+      onSendMention(selectedAgentIds, mentionText.trim())
+      setMentionText('')
+      setSelectedAgentIds([])
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -184,51 +204,71 @@ export default function ChatRoom({
       {/* State C: Full controls — only after divergent has started */}
       {hasDivergentStarted && (
         <>
-          {/* @mention input */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexShrink: 0 }}>
-            <select value={selectedAgent || ''} onChange={e => setSelectedAgent(Number(e.target.value) || null)}
-              disabled={!!isStreaming}
-              style={{
-                padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                fontSize: 14, background: 'var(--surface)', color: 'var(--text-primary)',
-                minWidth: 160, outline: 'none', opacity: isStreaming ? 0.5 : 1,
-              }}>
-              <option value="">@mention an agent...</option>
-              {nonScribeAgents.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-            <input value={mentionText} onChange={e => setMentionText(e.target.value)}
-              disabled={!!isStreaming}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && selectedAgent && mentionText.trim() && !isStreaming) {
-                  onSendMention(selectedAgent, mentionText.trim())
-                  setMentionText('')
-                }
-              }}
-              placeholder={isStreaming ? 'Waiting for responses...' : "Ask a follow-up..."}
-              style={{
-                flex: 1, padding: '8px 12px', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
-                background: 'var(--surface)', color: 'var(--text-primary)',
-                opacity: isStreaming ? 0.5 : 1,
-              }}
-            />
-            <button onClick={() => {
-              if (selectedAgent && mentionText.trim() && !isStreaming) {
-                onSendMention(selectedAgent, mentionText.trim())
-                setMentionText('')
-              }
-            }}
-              disabled={!!isStreaming}
-              style={{
-                padding: '8px 20px', background: isStreaming ? '#D1D5DB' : 'var(--accent)',
-                color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                cursor: isStreaming ? 'not-allowed' : 'pointer',
-                fontSize: 14, fontWeight: 500, flexShrink: 0,
-              }}>
-              @Send
-            </button>
+          {/* @mention area — multi-select pills + text input */}
+          <div style={{ marginBottom: 12, flexShrink: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {nonScribeAgents.map(a => {
+                const sel = selectedAgentIds.includes(a.id)
+                return (
+                  <label key={a.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '4px 12px', borderRadius: 'var(--radius-full)',
+                    background: sel ? 'var(--primary)' : 'var(--bg)',
+                    color: sel ? '#fff' : 'var(--text-primary)',
+                    border: sel ? 'none' : '1px solid var(--border)',
+                    cursor: isStreaming ? 'not-allowed' : 'pointer',
+                    fontSize: 13, userSelect: 'none', opacity: isStreaming ? 0.5 : 1,
+                    transition: 'all 0.15s',
+                  }}>
+                    <input type="checkbox" checked={sel}
+                      onChange={() => toggleAgent(a.id)}
+                      disabled={!!isStreaming}
+                      style={{ display: 'none' }} />
+                    {a.name}
+                  </label>
+                )
+              })}
+              <button onClick={selectAll} disabled={!!isStreaming}
+                style={{
+                  padding: '4px 12px', borderRadius: 'var(--radius-full)',
+                  background: selectedAgentIds.length === nonScribeAgents.length ? 'var(--accent)' : 'var(--accent-light)',
+                  color: selectedAgentIds.length === nonScribeAgents.length ? '#fff' : 'var(--accent)',
+                  border: '1px solid var(--primary-border)', fontSize: 13,
+                  cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1,
+                }}>
+                {selectedAgentIds.length === nonScribeAgents.length ? 'Deselect All' : '@All'}
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={mentionText} onChange={e => setMentionText(e.target.value)}
+                disabled={!!isStreaming}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && selectedAgentIds.length > 0 && mentionText.trim() && !isStreaming) {
+                    sendMention()
+                  }
+                }}
+                placeholder={isStreaming ? 'Waiting for responses...' : "Ask a follow-up..."}
+                style={{
+                  flex: 1, padding: '8px 12px', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
+                  background: 'var(--surface)', color: 'var(--text-primary)',
+                  opacity: isStreaming ? 0.5 : 1,
+                }}
+              />
+              <button onClick={sendMention}
+                disabled={!!isStreaming || selectedAgentIds.length === 0 || !mentionText.trim()}
+                style={{
+                  padding: '8px 20px',
+                  background: isStreaming || selectedAgentIds.length === 0 || !mentionText.trim()
+                    ? '#D1D5DB' : 'var(--accent)',
+                  color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                  cursor: isStreaming || selectedAgentIds.length === 0 || !mentionText.trim()
+                    ? 'not-allowed' : 'pointer',
+                  fontSize: 14, fontWeight: 500, flexShrink: 0,
+                }}>
+                @Send
+              </button>
+            </div>
           </div>
 
           {/* Round controls */}
