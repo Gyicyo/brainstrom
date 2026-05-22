@@ -69,7 +69,9 @@ export function useSession(sessionId: number) {
       for (const msg of agentMsgs) {
         if (msg.agent_id === null) continue
         const cleanup = streamAgentMessage(sessionId, detail.current_round.id, msg.id, {
-          onAgentStart: () => {},
+          onAgentStart: (data) => {
+            setStreamContents(prev => ({ ...prev, [data.agent_id]: '' }))
+          },
           onToken: (data) => {
             setStreamContents(prev => ({
               ...prev,
@@ -108,7 +110,11 @@ export function useSession(sessionId: number) {
             })
           },
           onConnectionError: (_messageId, err) => {
-            // Per-agent connection error — don't stop other agents
+            setStreamingAgentIds(prev => {
+              const next = new Set(prev)
+              next.delete(msg.agent_id!)
+              return next
+            })
           },
           onComplete: () => {
             done++

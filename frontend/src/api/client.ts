@@ -80,6 +80,7 @@ export function streamAgentMessage(
   const timeout = setTimeout(() => {
     es.close();
     callbacks.onConnectionError(messageId, 'Connection timed out. Is the backend running?');
+    callbacks.onComplete();
   }, 10000);
 
   es.addEventListener('agent_start', (e) => {
@@ -107,6 +108,7 @@ export function streamAgentMessage(
     clearTimeout(timeout);
     es.close();
     callbacks.onConnectionError(messageId, 'Failed to connect to streaming endpoint');
+    callbacks.onComplete();
   };
 
   return () => { clearTimeout(timeout); es.close(); };
