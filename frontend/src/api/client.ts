@@ -39,15 +39,15 @@ export const getCurrentRound = (sessionId: number) =>
 export const divergentRound = (sessionId: number, roundId: number) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/divergent`, {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, round_id: roundId }),
+    body: JSON.stringify({ round_id: roundId }),
   });
 export const mentionAgent = (sessionId: number, roundId: number, agentId: number, question: string) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/mention`, {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, round_id: roundId, agent_id: agentId, question }),
+    body: JSON.stringify({ round_id: roundId, agent_id: agentId, question }),
   });
 export const endRound = (sessionId: number, roundId: number) =>
   fetchJSON<RoundDetailType>(`/sessions/${sessionId}/rounds/end-round`, {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, round_id: roundId }),
+    body: JSON.stringify({ round_id: roundId }),
   });

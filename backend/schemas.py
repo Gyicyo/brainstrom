@@ -105,17 +105,14 @@ class RoundDetailResponse(BaseModel):
 
 
 class DivergentRequest(BaseModel):
-    session_id: int
     round_id: int
 
 
 class MentionRequest(BaseModel):
-    session_id: int
     round_id: int
     agent_id: int
     question: str
 
 
 class EndRoundRequest(BaseModel):
-    session_id: int
     round_id: int
