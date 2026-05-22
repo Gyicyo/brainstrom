@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -29,10 +29,12 @@ class Session(Base):
 
     rounds = relationship("Round", back_populates="session", cascade="all, delete-orphan",
                           order_by="Round.round_number")
+    session_agents = relationship("SessionAgent", back_populates="session", cascade="all, delete-orphan")
 
 
 class SessionAgent(Base):
     __tablename__ = "session_agents"
+    __table_args__ = (UniqueConstraint("session_id", "agent_id", name="uq_session_agent"),)
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -40,10 +42,12 @@ class SessionAgent(Base):
     is_scribe = Column(Boolean, default=False)
 
     agent = relationship("Agent")
+    session = relationship("Session", back_populates="session_agents")
 
 
 class Round(Base):
     __tablename__ = "rounds"
+    __table_args__ = (UniqueConstraint("session_id", "round_number", name="uq_session_round"),)
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
