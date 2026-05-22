@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -235,6 +236,8 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
         Message.round_id == round_id
     ).order_by(Message.created_at).all()
 
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
     agent_tasks = []
     for sa in session_agents:
         if sa.agent:
@@ -246,31 +249,50 @@ async def stream_divergent(session_id: int, round_id: int, db: Session = Depends
                 )
                 agent_tasks.append((sa.agent, msg, prompt))
 
-    async def event_generator():
+    n_tasks = len(agent_tasks)
+
+    async def run_agent(agent, msg, prompt):
+        """Run one agent, pushing events to shared queue."""
         from database import SessionLocal
         gen_db = SessionLocal()
         try:
-            for agent, msg, prompt in agent_tasks:
-                yield f"event: agent_start\ndata: {json.dumps({'agent_id': agent.id, 'agent_name': agent.name, 'message_id': msg.id})}\n\n"
+            await queue.put(("agent_start", {"agent_id": agent.id, "agent_name": agent.name, "message_id": msg.id}))
 
-                full_content = ""
-                try:
-                    async for token in stream_agent(agent, prompt):
-                        full_content += token
-                        yield f"event: token\ndata: {json.dumps({'agent_id': agent.id, 'token': token})}\n\n"
+            full_content = ""
+            async for token in stream_agent(agent, prompt):
+                full_content += token
+                await queue.put(("token", {"agent_id": agent.id, "token": token}))
 
-                    db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
-                    if db_msg:
-                        db_msg.content = full_content
-                        gen_db.commit()
+            db_msg = gen_db.query(Message).filter(Message.id == msg.id).first()
+            if db_msg:
+                db_msg.content = full_content
+                gen_db.commit()
 
-                    yield f"event: agent_done\ndata: {json.dumps({'agent_id': agent.id})}\n\n"
-                except Exception as e:
-                    yield f"event: agent_error\ndata: {json.dumps({'agent_id': agent.id, 'error': str(e)})}\n\n"
+            await queue.put(("agent_done", {"agent_id": agent.id}))
+        except Exception as e:
+            await queue.put(("agent_error", {"agent_id": agent.id, "error": str(e)}))
+        finally:
+            await queue.put(("sentinel", None))
+            gen_db.close()
 
+    # Create tasks OUTSIDE the generator — they run on the event loop
+    # that exists in the endpoint function, not inside Starlette's anyio
+    tasks = [asyncio.create_task(run_agent(agent, msg, prompt))
+             for agent, msg, prompt in agent_tasks]
+
+    async def event_generator():
+        done = 0
+        try:
+            while done < n_tasks:
+                typ, data = await queue.get()
+                if typ == "sentinel":
+                    done += 1
+                    continue
+                yield f"event: {typ}\ndata: {json.dumps(data)}\n\n"
             yield "event: complete\ndata: {}\n\n"
         finally:
-            gen_db.close()
+            for t in tasks:
+                t.cancel()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
