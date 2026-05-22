@@ -32,14 +32,16 @@ export async function getSession(id: number): Promise<SessionRecord | undefined>
 }
 
 export async function createSession(data: Omit<SessionRecord, 'id' | 'created_at'>, agentIds: number[], scribeAgentId: number): Promise<number> {
-  const sid = await db.sessions.add({ ...data, created_at: new Date().toISOString() });
-  const rows: SessionAgentRecord[] = agentIds.map(aid => ({
-    session_id: sid,
-    agent_id: aid,
-    is_scribe: aid === scribeAgentId,
-  }));
-  await db.sessionAgents.bulkAdd(rows);
-  return sid;
+  return db.transaction('rw', db.sessions, db.sessionAgents, async () => {
+    const sid = await db.sessions.add({ ...data, created_at: new Date().toISOString() });
+    const rows: SessionAgentRecord[] = agentIds.map(aid => ({
+      session_id: sid,
+      agent_id: aid,
+      is_scribe: aid === scribeAgentId,
+    }));
+    await db.sessionAgents.bulkAdd(rows);
+    return sid;
+  });
 }
 
 export async function updateSession(id: number, data: Partial<SessionRecord>): Promise<void> {
@@ -47,18 +49,28 @@ export async function updateSession(id: number, data: Partial<SessionRecord>): P
 }
 
 export async function deleteSession(id: number): Promise<void> {
-  const roundIds = (await db.rounds.where('session_id').equals(id).toArray()).map(r => r.id!);
-  for (const rid of roundIds) {
-    const threadIds = (await db.threads.where('round_id').equals(rid).toArray()).map(t => t.id!);
-    for (const tid of threadIds) {
-      await db.threadMessages.where('thread_id').equals(tid).delete();
+  await db.transaction('rw', db.rounds, db.threads, db.threadMessages, db.messages, async () => {
+    const rounds = await db.rounds.where('session_id').equals(id).toArray();
+    const roundIds = rounds.map(r => r.id!);
+
+    // Collect all thread IDs for batched threadMessage delete
+    const allThreadIds: number[] = [];
+    for (const rid of roundIds) {
+      const threadIds = (await db.threads.where('round_id').equals(rid).toArray()).map(t => t.id!);
+      allThreadIds.push(...threadIds);
     }
-    await db.threads.where('round_id').equals(rid).delete();
-    await db.messages.where('round_id').equals(rid).delete();
-  }
-  await db.rounds.where('session_id').equals(id).delete();
-  await db.sessionAgents.where('session_id').equals(id).delete();
-  await db.sessions.delete(id);
+    if (allThreadIds.length > 0) {
+      await db.threadMessages.where('thread_id').anyOf(allThreadIds).delete();
+    }
+
+    for (const rid of roundIds) {
+      await db.threads.where('round_id').equals(rid).delete();
+      await db.messages.where('round_id').equals(rid).delete();
+    }
+    await db.rounds.where('session_id').equals(id).delete();
+    await db.sessionAgents.where('session_id').equals(id).delete();
+    await db.sessions.delete(id);
+  });
 }
 
 // SessionAgent helpers
