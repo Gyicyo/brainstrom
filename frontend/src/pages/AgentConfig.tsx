@@ -7,7 +7,7 @@ import type { AgentType } from '../types'
 const emptyForm = {
   name: '', personality: '', system_prompt: '',
   api_base_url: 'https://api.openai.com/v1', api_key: '', model_name: 'gpt-4o',
-  avatar_url: '',
+  avatar_url: '', search_provider: 'duckduckgo', search_api_key: '', search_api_url: '',
 }
 
 export default function AgentConfig() {
@@ -103,6 +103,22 @@ export default function AgentConfig() {
             <input placeholder="Model Name" value={editing.model_name || ''}
               onChange={e => setEditing({ ...editing, model_name: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
+            <span style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Web Search</span>
+            <select value={editing.search_provider || 'duckduckgo'} onChange={e => setEditing({ ...editing, search_provider: e.target.value })}
+              style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }}>
+              <option value="duckduckgo">DuckDuckGo (default, no API key)</option>
+              <option value="custom">Custom Search API</option>
+            </select>
+            {editing.search_provider === 'custom' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input placeholder="Search API URL" value={editing.search_api_url || ''}
+                  onChange={e => setEditing({ ...editing, search_api_url: e.target.value })}
+                  style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
+                <input placeholder="Search API Key" type="password" value={editing.search_api_key || ''}
+                  onChange={e => setEditing({ ...editing, search_api_key: e.target.value })}
+                  style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={handleSave}
                 style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>

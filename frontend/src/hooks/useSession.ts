@@ -7,8 +7,10 @@ import {
   getRounds, updateSession,
   deleteSession as deleteSessionFromDb,
 } from '../db/helpers';
-import { streamAgentResponse, callAgent } from '../llm/stream';
+import { streamAgentResponse, callAgent, callAgentWithTools } from '../llm/stream';
+import type { ToolDefinition } from '../llm/stream';
 import { buildSystemPrompt, buildDivergentContext } from '../llm/prompt';
+import { searchWeb } from '../search';
 import type { RoundDetailType } from '../types';
 
 export function useSession(sessionId: number) {
@@ -18,6 +20,7 @@ export function useSession(sessionId: number) {
   const [error, setError] = useState<string | null>(null);
   const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set());
   const [streamContents, setStreamContents] = useState<Record<number, string>>({});
+  const [searchStatus, setSearchStatus] = useState<Record<number, { status: string; query?: string }>>({});
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -25,6 +28,15 @@ export function useSession(sessionId: number) {
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  async function resolveAgentForLLMCall(
+    agentInfo: { id: number; name: string; is_scribe: boolean },
+  ): Promise<import('../db/db').AgentRecord | undefined> {
+    const saRecords = await getSessionAgents(sessionId);
+    const sa = saRecords.find(s => s.generated_agent_id === agentInfo.id);
+    if (sa) return getAgent(sa.agent_id);
+    return getAgent(agentInfo.id);
+  }
 
   const isStreaming = streamingAgentIds.size > 0;
 
@@ -36,14 +48,20 @@ export function useSession(sessionId: number) {
     const sid = session.id!;
 
     const saRecords = await getSessionAgents(sid);
-    const saAgentIds = saRecords.map(sa => sa.agent_id);
+    const saAgentIds = [...new Set(saRecords.map(sa => sa.agent_id))];
     const saAgents = saAgentIds.length > 0 ? await db.agents.bulkGet(saAgentIds) : [];
     const saAgentMap = new Map(saAgents.filter(Boolean).map(a => [a!.id!, a!]));
+    const generatedAgentIds = saRecords.filter(sa => sa.generated_agent_id != null).map(sa => sa.generated_agent_id!);
+    const genAgents = generatedAgentIds.length > 0 ? await db.generatedAgents.bulkGet(generatedAgentIds) : [];
+    const genAgentMap = new Map(genAgents.filter(Boolean).map(a => [a!.id!, a!]));
     const agentsAttached: { id: number; name: string; is_scribe: boolean }[] = [];
     for (const sa of saRecords) {
-      const agent = saAgentMap.get(sa.agent_id);
-      if (agent) {
-        agentsAttached.push({ id: agent.id!, name: agent.name, is_scribe: sa.is_scribe });
+      if (sa.generated_agent_id != null) {
+        const genAgent = genAgentMap.get(sa.generated_agent_id);
+        if (genAgent) agentsAttached.push({ id: genAgent.id!, name: genAgent.name, is_scribe: sa.is_scribe });
+      } else {
+        const agent = saAgentMap.get(sa.agent_id);
+        if (agent) agentsAttached.push({ id: agent.id!, name: agent.name, is_scribe: sa.is_scribe });
       }
     }
 
@@ -159,7 +177,7 @@ export function useSession(sessionId: number) {
       // Create empty messages for each agent
       const entries: { agentId: number; messageId: number }[] = [];
       for (const a of nonScribeAgents) {
-        const agent = await getAgent(a.id);
+        const agent = await resolveAgentForLLMCall(a);
         if (!agent) continue;
         const mid = await createMessage({
           round_id: roundId,
@@ -186,15 +204,57 @@ export function useSession(sessionId: number) {
       const abortController = new AbortController();
       abortRef.current = abortController;
 
+      const searchToolDef: ToolDefinition = {
+        type: 'function',
+        function: {
+          name: 'search_web',
+          description: 'Search the web for current, up-to-date information',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'The search query' } },
+            required: ['query'],
+          },
+        },
+      };
+
       const promises = entries.map(async ({ agentId, messageId }) => {
         try {
-          const agent = await getAgent(agentId);
+          const agent = await resolveAgentForLLMCall({ id: agentId, name: '', is_scribe: false });
           if (!agent) return;
-          const prompt = buildSystemPrompt(
+          let prompt = buildSystemPrompt(
             agent,
             context,
             'Provide your unique perspective on this topic. Be creative and specific.',
           );
+
+          // Phase 1: Non-streaming call with tools to check for search intent
+          const { tool_calls } = await callAgentWithTools(
+            agent,
+            [{ role: 'system', content: prompt }, { role: 'user', content: 'Please provide your response based on the instructions above.' }],
+            [searchToolDef],
+            4096,
+            abortController.signal,
+          );
+
+          if (tool_calls && tool_calls.length > 0) {
+            setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query: '' } }));
+            for (const tc of tool_calls) {
+              try {
+                const args = JSON.parse(tc.function.arguments);
+                const query = args.query || '';
+                setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query } }));
+                const provider = agent.search_provider
+                  ? { type: agent.search_provider as 'duckduckgo' | 'custom', apiKey: agent.search_api_key || '', apiUrl: agent.search_api_url || '' }
+                  : undefined;
+                const results = await searchWeb(query, provider);
+                const resultsText = results.map(r => `- ${r.title}: ${r.snippet} (${r.url})`).join('\n');
+                prompt = prompt + `\n\n## Web Search Results for "${query}"\n${resultsText || '(No results found)'}`;
+              } catch { /* search failed — proceed without */ }
+            }
+            setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'done', query: '' } }));
+          }
+
+          // Phase 2: Stream final response (no tools, content-only)
           let full = '';
           for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
             full += token;
@@ -202,6 +262,10 @@ export function useSession(sessionId: number) {
           }
           await updateMessage(messageId, { content: full });
         } finally {
+          setSearchStatus(prev => {
+            const { [agentId]: _, ...rest } = prev;
+            return rest;
+          });
           setStreamContents(prev => {
             const { [agentId]: _, ...rest } = prev;
             return rest;
@@ -230,15 +294,28 @@ export function useSession(sessionId: number) {
       const roundId = roundDetail.current_round.id;
       const context = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
 
+      const searchToolDef: ToolDefinition = {
+        type: 'function',
+        function: {
+          name: 'search_web',
+          description: 'Search the web for current, up-to-date information',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'The search query' } },
+            required: ['query'],
+          },
+        },
+      };
+
       for (const agentId of agentIds) {
-        const agent = await getAgent(agentId);
+        const agent = await resolveAgentForLLMCall({ id: agentId, name: '', is_scribe: false });
         if (!agent) continue;
 
         const tid = await createThread({ round_id: roundId, agent_id: agentId });
         await createThreadMessage({ thread_id: tid, is_human: true, content: question });
         const tmid = await createThreadMessage({ thread_id: tid, is_human: false, content: '' });
 
-        const prompt = buildSystemPrompt(
+        let prompt = buildSystemPrompt(
           agent,
           context + `\n\n## Private Question\n${question}`,
           'Respond to the human\'s private question thoughtfully.',
@@ -253,6 +330,33 @@ export function useSession(sessionId: number) {
 
         (async () => {
           try {
+            // Phase 1: Check for search intent
+            const { tool_calls } = await callAgentWithTools(
+              agent,
+              [{ role: 'system', content: prompt }, { role: 'user', content: 'Please provide your response based on the instructions above.' }],
+              [searchToolDef],
+              4096,
+              abortController.signal,
+            );
+
+            if (tool_calls && tool_calls.length > 0) {
+              setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query: '' } }));
+              for (const tc of tool_calls) {
+                try {
+                  const args = JSON.parse(tc.function.arguments);
+                  const query = args.query || '';
+                  setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query } }));
+                  const provider = agent.search_provider
+                    ? { type: agent.search_provider as 'duckduckgo' | 'custom', apiKey: agent.search_api_key || '', apiUrl: agent.search_api_url || '' }
+                    : undefined;
+                  const results = await searchWeb(query, provider);
+                  const resultsText = results.map(r => `- ${r.title}: ${r.snippet} (${r.url})`).join('\n');
+                  prompt = prompt + `\n\n## Web Search Results for "${query}"\n${resultsText || '(No results found)'}`;
+                } catch { /* search failed */ }
+              }
+              setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'done', query: '' } }));
+            }
+
             let full = '';
             for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
               full += token;
@@ -260,6 +364,10 @@ export function useSession(sessionId: number) {
             }
             await updateThreadMessage(tmid, { content: full });
           } finally {
+            setSearchStatus(prev => {
+              const { [agentId]: _, ...rest } = prev;
+              return rest;
+            });
             setStreamContents(prev => {
               const { [agentId]: _, ...rest } = prev;
               return rest;
@@ -291,7 +399,7 @@ export function useSession(sessionId: number) {
       const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
       if (!scribeAgentInfo) throw new Error('No scribe agent configured');
 
-      const scribeAgent = await getAgent(scribeAgentInfo.id);
+      const scribeAgent = await resolveAgentForLLMCall(scribeAgentInfo);
       if (!scribeAgent) throw new Error('Scribe agent not found');
 
       const messages = await getRoundMessages(roundId);
@@ -333,7 +441,7 @@ export function useSession(sessionId: number) {
       const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
       if (!scribeAgentInfo) throw new Error('No scribe agent configured');
 
-      const scribeAgent = await getAgent(scribeAgentInfo.id);
+      const scribeAgent = await resolveAgentForLLMCall(scribeAgentInfo);
       if (!scribeAgent) throw new Error('Scribe agent not found');
 
       const rounds = await getRounds(sessionId);
@@ -377,7 +485,7 @@ export function useSession(sessionId: number) {
 
   return {
     roundDetail, respondingAgentId, loading, error,
-    streamingAgentIds, streamContents, isStreaming,
+    streamingAgentIds, streamContents, isStreaming, searchStatus,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession,
     handleDeleteSession, fetchSummaries,

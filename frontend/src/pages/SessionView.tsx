@@ -40,7 +40,7 @@ export default function SessionView() {
 
   const {
     roundDetail, respondingAgentId, loading, error,
-    streamingAgentIds, streamContents, isStreaming,
+    streamingAgentIds, streamContents, isStreaming, searchStatus,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession, handleDeleteSession,
     fetchSummaries,
@@ -189,6 +189,7 @@ export default function SessionView() {
             streamingAgentIds={streamingAgentIds}
             streamContents={streamContents}
             isStreaming={isStreaming}
+            searchStatus={searchStatus}
           />
         </div>
       </div>

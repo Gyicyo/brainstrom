@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
+import SearchIndicator from './SearchIndicator'
 import RoundDivider from './RoundDivider'
 import AgentStatusBar from './AgentStatusBar'
 import type { RoundDetailType } from '../types'
@@ -16,12 +17,13 @@ interface Props {
   streamingAgentIds?: Set<number>;
   streamContents?: Record<number, string>;
   isStreaming?: boolean;
+  searchStatus?: Record<number, { status: string; query?: string }>;
 }
 
 export default function ChatRoom({
   roundDetail, onSendMention, onCreateRound, onStartDivergent,
   onStartNextRound, onEndRound, respondingAgentId, loading,
-  streamingAgentIds, streamContents, isStreaming,
+  streamingAgentIds, streamContents, isStreaming, searchStatus,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [mentionText, setMentionText] = useState('')
@@ -135,12 +137,18 @@ export default function ChatRoom({
           </p>
         ) : (
           current_round.public_messages.map(m => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              isHuman={m.is_human}
-              streamingContent={m.agent_id !== null ? streamContents?.[m.agent_id] : undefined}
-            />
+            <div key={m.id}>
+              <MessageBubble
+                message={m}
+                isHuman={m.is_human}
+                streamingContent={m.agent_id !== null ? streamContents?.[m.agent_id] : undefined}
+              />
+              {!m.is_human && m.agent_id != null && (
+                <div style={{ marginLeft: 48, marginTop: -6, marginBottom: 8 }}>
+                  <SearchIndicator searchStatus={searchStatus?.[m.agent_id] as any} />
+                </div>
+              )}
+            </div>
           ))
         )}
 
@@ -154,10 +162,17 @@ export default function ChatRoom({
               Private thread with {t.agent_name}
             </div>
             {t.messages.map(tm => (
-              <MessageBubble key={tm.id} message={{
-                id: tm.id, agent_id: null, agent_name: tm.is_human ? 'You' : t.agent_name,
-                is_human: tm.is_human, content: tm.content, created_at: tm.created_at,
-              }} isHuman={tm.is_human} />
+              <div key={tm.id}>
+                <MessageBubble message={{
+                  id: tm.id, agent_id: null, agent_name: tm.is_human ? 'You' : t.agent_name,
+                  is_human: tm.is_human, content: tm.content, created_at: tm.created_at,
+                }} isHuman={tm.is_human} />
+                {!tm.is_human && (
+                  <div style={{ marginLeft: 48, marginTop: -6, marginBottom: 8 }}>
+                    <SearchIndicator searchStatus={searchStatus?.[t.agent_id] as any} />
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         ))}
