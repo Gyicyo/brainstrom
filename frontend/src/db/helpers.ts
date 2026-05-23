@@ -92,6 +92,10 @@ export async function createGeneratedAgent(data: Omit<GeneratedAgentRecord, 'id'
   return db.generatedAgents.add({ ...data, created_at: new Date().toISOString() });
 }
 
+export async function updateGeneratedAgent(id: number, data: Partial<GeneratedAgentRecord>): Promise<void> {
+  await db.generatedAgents.update(id, data);
+}
+
 export async function deleteGeneratedAgent(id: number): Promise<void> {
   await db.generatedAgents.delete(id);
 }

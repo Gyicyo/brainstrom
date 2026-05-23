@@ -7,6 +7,9 @@ export interface AgentType {
   api_key: string;
   model_name: string;
   avatar_url: string;
+  search_provider?: string;
+  search_api_key?: string;
+  search_api_url?: string;
   created_at: string;
 }
 
@@ -74,6 +77,9 @@ export interface NewAgentInput {
   api_key: string;
   model_name: string;
   avatar_url: string;
+  search_provider?: string;
+  search_api_key?: string;
+  search_api_url?: string;
 }
 
 export interface NewSessionInput {
