@@ -9,6 +9,9 @@ export interface AgentRecord {
   api_key: string;
   model_name: string;
   avatar_url: string;
+  search_provider?: string;
+  search_api_key?: string;
+  search_api_url?: string;
   created_at: string;
 }
 
@@ -24,7 +27,17 @@ export interface SessionAgentRecord {
   id?: number;
   session_id: number;
   agent_id: number;
+  generated_agent_id?: number;
   is_scribe: boolean;
+}
+
+export interface GeneratedAgentRecord {
+  id?: number;
+  session_id: number;
+  name: string;
+  personality: string;
+  system_prompt: string;
+  created_at: string;
 }
 
 export interface RoundRecord {
@@ -67,10 +80,11 @@ class BrainstormDB extends Dexie {
   messages!: Table<MessageRecord, number>;
   threads!: Table<ThreadRecord, number>;
   threadMessages!: Table<ThreadMessageRecord, number>;
+  generatedAgents!: Table<GeneratedAgentRecord, number>;
 
   constructor() {
     super('brainstorm');
-    this.version(1).stores({
+    this.version(2).stores({
       agents: '++id, name',
       sessions: '++id, status',
       sessionAgents: '++id, session_id, agent_id, is_scribe',
@@ -78,6 +92,7 @@ class BrainstormDB extends Dexie {
       messages: '++id, round_id, agent_id',
       threads: '++id, round_id, agent_id',
       threadMessages: '++id, thread_id',
+      generatedAgents: '++id, session_id',
     });
   }
 }

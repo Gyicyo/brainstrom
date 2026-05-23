@@ -1,5 +1,5 @@
 import { db } from './db';
-import type { AgentRecord, SessionRecord, SessionAgentRecord, RoundRecord, MessageRecord, ThreadRecord, ThreadMessageRecord } from './db';
+import type { AgentRecord, SessionRecord, SessionAgentRecord, RoundRecord, MessageRecord, ThreadRecord, ThreadMessageRecord, GeneratedAgentRecord } from './db';
 
 // Agent helpers
 export async function listAgents(): Promise<AgentRecord[]> {
@@ -49,7 +49,7 @@ export async function updateSession(id: number, data: Partial<SessionRecord>): P
 }
 
 export async function deleteSession(id: number): Promise<void> {
-  await db.transaction('rw', db.rounds, db.threads, db.threadMessages, db.messages, async () => {
+  await db.transaction('rw', [db.rounds, db.threads, db.threadMessages, db.messages, db.generatedAgents], async () => {
     const rounds = await db.rounds.where('session_id').equals(id).toArray();
     const roundIds = rounds.map(r => r.id!);
 
@@ -69,6 +69,7 @@ export async function deleteSession(id: number): Promise<void> {
     }
     await db.rounds.where('session_id').equals(id).delete();
     await db.sessionAgents.where('session_id').equals(id).delete();
+    await db.generatedAgents.where('session_id').equals(id).delete();
     await db.sessions.delete(id);
   });
 }
@@ -76,6 +77,48 @@ export async function deleteSession(id: number): Promise<void> {
 // SessionAgent helpers
 export async function getSessionAgents(sessionId: number): Promise<SessionAgentRecord[]> {
   return db.sessionAgents.where('session_id').equals(sessionId).toArray();
+}
+
+// GeneratedAgent helpers
+export async function listGeneratedAgents(sessionId: number): Promise<GeneratedAgentRecord[]> {
+  return db.generatedAgents.where('session_id').equals(sessionId).toArray();
+}
+
+export async function getGeneratedAgent(id: number): Promise<GeneratedAgentRecord | undefined> {
+  return db.generatedAgents.get(id);
+}
+
+export async function createGeneratedAgent(data: Omit<GeneratedAgentRecord, 'id' | 'created_at'>): Promise<number> {
+  return db.generatedAgents.add({ ...data, created_at: new Date().toISOString() });
+}
+
+export async function deleteGeneratedAgent(id: number): Promise<void> {
+  await db.generatedAgents.delete(id);
+}
+
+export async function deleteGeneratedAgentsBySession(sessionId: number): Promise<void> {
+  await db.generatedAgents.where('session_id').equals(sessionId).delete();
+}
+
+export async function createSessionWithGeneratedAgents(
+  data: Omit<SessionRecord, 'id' | 'created_at'>,
+  generatorAgentId: number,
+  generatedAgents: Omit<GeneratedAgentRecord, 'id' | 'created_at' | 'session_id'>[],
+): Promise<number> {
+  return db.transaction('rw', db.sessions, db.sessionAgents, db.generatedAgents, async () => {
+    const sid = await db.sessions.add({ ...data, created_at: new Date().toISOString() });
+    const createdIds: number[] = [];
+    for (const ga of generatedAgents) {
+      const gaid = await db.generatedAgents.add({ ...ga, session_id: sid, created_at: new Date().toISOString() });
+      createdIds.push(gaid);
+    }
+    const rows: SessionAgentRecord[] = [
+      { session_id: sid, agent_id: generatorAgentId, is_scribe: true },
+      ...createdIds.map(gaid => ({ session_id: sid, agent_id: generatorAgentId, generated_agent_id: gaid, is_scribe: false })),
+    ];
+    await db.sessionAgents.bulkAdd(rows);
+    return sid;
+  });
 }
 
 // Round helpers

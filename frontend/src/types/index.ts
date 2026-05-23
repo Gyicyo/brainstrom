@@ -57,6 +57,15 @@ export interface RoundDetailType {
   agents_attached: { id: number; name: string; is_scribe: boolean }[];
 }
 
+export interface GeneratedAgentType {
+  id: number;
+  name: string;
+  personality: string;
+  system_prompt: string;
+  session_id: number;
+  created_at: string;
+}
+
 export interface NewAgentInput {
   name: string;
   personality: string;
