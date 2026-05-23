@@ -67,3 +67,28 @@ export async function buildDivergentContext(
 
   return parts.join('\n\n');
 }
+
+export function buildGeneratorPrompt(
+  generatorName: string,
+  topic: string,
+  initialContext: string,
+  count: number,
+): string {
+  return `You are ${generatorName}. Generate ${count} discussion agents for a brainstorming session.
+Topic: ${topic}
+Initial context: ${initialContext}
+
+For each agent provide:
+- name: Role name
+- personality: One-sentence role description
+- system_prompt: Detailed instruction prompt for this role
+
+Respond in this JSON format:
+{
+  "agents": [
+    { "name": "...", "personality": "...", "system_prompt": "..." }
+  ]
+}
+
+I (the generator) will serve as the scribe who summarizes discussions. Generated agents are all participants.`;
+}
