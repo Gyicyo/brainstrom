@@ -14,6 +14,7 @@ export function createDiscussionAgent(agentInfo, apiConfig) {
       model: getModel('openai', apiConfig.modelName) ?? {
         id: apiConfig.modelName,
         provider: 'custom',
+        baseUrl: apiConfig.apiBaseUrl,
       },
       tools: [],
     },
