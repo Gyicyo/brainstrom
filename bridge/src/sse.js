@@ -1,6 +1,10 @@
 export function sendSSE(res, event, data) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  try {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  } catch {
+    // response may already be closed
+  }
 }
 
 export function setupSSE(req, res) {
