@@ -68,7 +68,7 @@ class RoomManager {
     const room = this.rooms.get(roomId);
     if (room) {
       for (const [, agent] of room.agents) {
-        agent.dispose();
+        agent.reset();
       }
     }
     const dir = this.roomDir(roomId);

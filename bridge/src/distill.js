@@ -6,7 +6,7 @@ let searchAgent = null;
 
 function getSearchAgent(apiConfig) {
   if (searchAgent) {
-    searchAgent.dispose();
+    searchAgent.reset();
     searchAgent = null;
   }
   searchAgent = new Agent({
@@ -120,7 +120,7 @@ Be thorough. Return the COMPLETE SKILL.md.`,
       skills.push({ name: skillName, displayName: expert, content: skillContent });
       onProgress({ phase: 'skill_ready', expert, name: skillName, content: skillContent });
     } finally {
-      distillAgent.dispose();
+      distillAgent.reset();
     }
 
     if (signal?.aborted) break;
