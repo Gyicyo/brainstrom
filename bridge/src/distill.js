@@ -1,17 +1,18 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import { getModel } from '@earendil-works/pi-ai';
 import { createStreamFn } from './streamFn.js';
-import { createSearchTool } from './searchTool.js';
 
 let searchAgent = null;
 
 function getSearchAgent(apiConfig) {
-  if (searchAgent) return searchAgent;
+  if (searchAgent) {
+    searchAgent.dispose();
+    searchAgent = null;
+  }
   searchAgent = new Agent({
     initialState: {
-      systemPrompt: 'You are an expert finder. Given a topic, identify 3-5 relevant experts (real people) who have significant knowledge or opinions on this topic. Respond with a JSON array of full names only, no explanation.',
+      systemPrompt: 'You are an expert finder. Identify 3-5 real experts (well-known researchers, practitioners, authors) relevant to the given topic. Use your training knowledge — do not search the web. Respond ONLY with a JSON array of full names, no explanation, no prefix.',
       model: getModel('openai', apiConfig.modelName) ?? { id: apiConfig.modelName, provider: 'openai' },
-      tools: [createSearchTool()],
     },
     streamFn: createStreamFn(apiConfig),
     sessionId: 'search-agent',
@@ -22,27 +23,18 @@ function getSearchAgent(apiConfig) {
 function promptAndCollect(agent, userMessage) {
   return new Promise((resolve, reject) => {
     let fullContent = '';
-    const eventsSeen = [];
     const unsubscribe = agent.subscribe((event) => {
-      eventsSeen.push(event.type);
-      if (event.type === 'message_update') {
-        if (event.assistantMessageEvent?.type === 'text_delta') {
-          fullContent += event.assistantMessageEvent.delta;
-        } else {
-          console.error('[distill] message_update with non-text event:', event.assistantMessageEvent?.type);
-        }
+      if (event.type === 'message_update' &&
+          event.assistantMessageEvent?.type === 'text_delta') {
+        fullContent += event.assistantMessageEvent.delta;
       }
       if (event.type === 'agent_end') {
         unsubscribe();
-        console.error('[distill] promptAndCollect resolved, events seen:', eventsSeen.join(','));
-        console.error('[distill] fullContent length:', fullContent.length);
-        console.error('[distill] fullContent preview:', fullContent.slice(0, 300));
         resolve(fullContent);
       }
     });
     agent.prompt({ role: 'user', content: userMessage, timestamp: Date.now() })
       .catch((err) => {
-        console.error('[distill] prompt rejected:', err.message);
         unsubscribe();
         reject(err);
       });
@@ -56,7 +48,7 @@ export async function distillExperts(topic, apiConfig, onProgress, signal) {
   let experts = [];
   try {
     const response = await promptAndCollect(agent,
-      `Search the web and identify 3-5 real experts relevant to the topic: "${topic}". Consider who has blogged, written books, given talks, or done research on this topic. Return ONLY a JSON array of full names. Example: ["Name One", "Name Two"]`
+      `Identify 3-5 real experts relevant to: "${topic}". Return ONLY a JSON array of full names. Example: ["Name One", "Name Two"]`
     );
     const match = response.match(/\[[\s\S]*?\]/);
     if (match) {
@@ -85,7 +77,7 @@ export async function distillExperts(topic, apiConfig, onProgress, signal) {
       initialState: {
         systemPrompt: `You are Nuwa — a cognitive framework extractor. Your task is to research ${expert} and distill their thinking into a structured SKILL.md file.
 
-Research across multiple sources: their writings, interviews, talks, social media, and what critics say.
+Use your training knowledge about ${expert}: their known ideas, writings, interviews, talks, and public statements.
 
 Then produce a SKILL.md with YAML frontmatter:
 ---
@@ -100,9 +92,8 @@ Body sections:
 4. Values and Anti-patterns — what they stand for, what they avoid
 5. Honest Limitations — what this skill cannot do
 
-Be thorough. Research deeply. Return the COMPLETE SKILL.md.`,
+Be thorough. Return the COMPLETE SKILL.md.`,
         model: getModel('openai', apiConfig.modelName) ?? { id: apiConfig.modelName, provider: 'openai' },
-        tools: [createSearchTool()],
       },
       streamFn: createStreamFn(apiConfig),
     });
@@ -110,17 +101,17 @@ Be thorough. Research deeply. Return the COMPLETE SKILL.md.`,
     try {
       onProgress({ phase: 'distilling', expert, progress: '1/3 Collecting public materials...' });
       await promptAndCollect(distillAgent,
-        `Research ${expert} thoroughly. Search the web for their key ideas, major writings, interviews, talks, and public statements. Collect enough material to understand their unique thinking framework. Focus on how they think, not just what they've done.`
+        `Using your knowledge, write everything you know about ${expert}: their key ideas, major writings, public statements, and what makes their thinking distinctive.`
       );
 
       onProgress({ phase: 'distilling', expert, progress: '2/3 Extracting mental models...' });
       await promptAndCollect(distillAgent,
-        `Now analyze ${expert}'s thinking patterns. Identify their core mental models (recurring frameworks they apply), decision heuristics (rules of thumb), and expression DNA (how they communicate). What makes their thinking distinctive? What patterns appear across different domains they engage with?`
+        `Now analyze ${expert}'s thinking patterns. Identify their core mental models (recurring frameworks they apply), decision heuristics (rules of thumb), and expression DNA (how they communicate).`
       );
 
       onProgress({ phase: 'distilling', expert, progress: '3/3 Generating SKILL.md...' });
       const skillContent = await promptAndCollect(distillAgent,
-        `Generate the final SKILL.md file for ${expert}. Include frontmatter (name, description), mental models, decision heuristics, expression DNA, values and anti-patterns, and honest limitations. Return ONLY the raw SKILL.md content. No preamble, no explanation.`
+        `Generate the final SKILL.md file for ${expert}. Include frontmatter (name, description), mental models, decision heuristics, expression DNA, values and anti-patterns, and honest limitations. Return ONLY the raw SKILL.md content.`
       );
 
       const nameMatch = skillContent.match(/^name:\s*(.+)$/m);

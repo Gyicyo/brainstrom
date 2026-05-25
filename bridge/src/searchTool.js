@@ -35,6 +35,7 @@ export function createSearchTool() {
           details: { urls: results.map(r => r.url) },
         };
       } catch (err) {
+        console.error('[searchTool] error:', err.message);
         return {
           content: [{ type: 'text', text: `Search failed: ${err.message}` }],
           details: {},
