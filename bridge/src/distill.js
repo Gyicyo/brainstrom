@@ -22,18 +22,27 @@ function getSearchAgent(apiConfig) {
 function promptAndCollect(agent, userMessage) {
   return new Promise((resolve, reject) => {
     let fullContent = '';
+    const eventsSeen = [];
     const unsubscribe = agent.subscribe((event) => {
-      if (event.type === 'message_update' &&
-          event.assistantMessageEvent.type === 'text_delta') {
-        fullContent += event.assistantMessageEvent.delta;
+      eventsSeen.push(event.type);
+      if (event.type === 'message_update') {
+        if (event.assistantMessageEvent?.type === 'text_delta') {
+          fullContent += event.assistantMessageEvent.delta;
+        } else {
+          console.error('[distill] message_update with non-text event:', event.assistantMessageEvent?.type);
+        }
       }
       if (event.type === 'agent_end') {
         unsubscribe();
+        console.error('[distill] promptAndCollect resolved, events seen:', eventsSeen.join(','));
+        console.error('[distill] fullContent length:', fullContent.length);
+        console.error('[distill] fullContent preview:', fullContent.slice(0, 300));
         resolve(fullContent);
       }
     });
     agent.prompt({ role: 'user', content: userMessage, timestamp: Date.now() })
       .catch((err) => {
+        console.error('[distill] prompt rejected:', err.message);
         unsubscribe();
         reject(err);
       });
