@@ -75,7 +75,7 @@ export async function* streamScribeSummary(
 
 export async function* distillExperts(
   topic: string,
-  apiConfig: { apiKey: string; baseUrl: string; model: string },
+  apiConfig: { apiKey: string; apiBaseUrl: string; modelName: string },
   signal?: AbortSignal,
 ): AsyncGenerator<DistillEvent, DistillResult | undefined, undefined> {
   const resp = await fetch(`${BRIDGE_URL}/api/distill`, {

@@ -182,8 +182,8 @@ export default function Dashboard() {
 
       const apiConfig = {
         apiKey: agent.api_key,
-        baseUrl: agent.api_base_url,
-        model: agent.model_name,
+        apiBaseUrl: agent.api_base_url,
+        modelName: agent.model_name,
       }
 
       const events = distillExperts(topic, apiConfig)
