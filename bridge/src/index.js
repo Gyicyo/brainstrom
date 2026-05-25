@@ -12,9 +12,10 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
 
-// Mount routes (placeholder)
-// app.use('/api/room', roomRoutes);
-// app.use('/api/distill', distillRoutes);
+import roomRoutes from './routes/rooms.js';
+app.use('/api/room', roomRoutes);
+
+// Distill routes will be mounted in Task 7
 
 app.listen(PORT, () => {
   console.log(`Bridge server running on http://localhost:${PORT}`);
