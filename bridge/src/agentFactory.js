@@ -1,6 +1,7 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import { getModel } from '@earendil-works/pi-ai';
 import { createStreamFn } from './streamFn.js';
+import { createSearchTool } from './searchTool.js';
 
 export function createDiscussionAgent(agentInfo, apiConfig) {
   const { name, skillContent } = agentInfo;
@@ -16,7 +17,7 @@ export function createDiscussionAgent(agentInfo, apiConfig) {
         provider: 'custom',
         baseUrl: apiConfig.apiBaseUrl,
       },
-      tools: [],
+      tools: [createSearchTool()],
     },
     streamFn,
     sessionId: `agent-${name}`,
