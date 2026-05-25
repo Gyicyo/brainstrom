@@ -7,36 +7,23 @@ import {
   getRounds, updateSession,
   deleteSession as deleteSessionFromDb,
 } from '../db/helpers';
-import { streamAgentResponse, callAgent, callAgentWithTools } from '../llm/stream';
-import type { ToolDefinition } from '../llm/stream';
-import { buildSystemPrompt, buildDivergentContext } from '../llm/prompt';
-import { searchWeb } from '../search';
+import { streamChat, streamScribeSummary, createRoom, deleteRoom } from '../llm/bridgeApi';
 import type { RoundDetailType } from '../types';
 
 export function useSession(sessionId: number) {
   const [roundDetail, setRoundDetail] = useState<RoundDetailType | null>(null);
-  const [respondingAgentId, setRespondingAgentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set());
   const [streamContents, setStreamContents] = useState<Record<number, string>>({});
-  const [searchStatus, setSearchStatus] = useState<Record<number, { status: string; query?: string }>>({});
+  const [streamingScribeContent, setStreamingScribeContent] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const roomCreatedRef = useRef(false);
 
-  // Cancel all in-flight LLM requests on unmount
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
-
-  async function resolveAgentForLLMCall(
-    agentInfo: { id: number; name: string; is_scribe: boolean },
-  ): Promise<import('../db/db').AgentRecord | undefined> {
-    const saRecords = await getSessionAgents(sessionId);
-    const sa = saRecords.find(s => s.generated_agent_id === agentInfo.id);
-    if (sa) return getAgent(sa.agent_id);
-    return getAgent(agentInfo.id);
-  }
 
   const isStreaming = streamingAgentIds.size > 0;
 
@@ -144,6 +131,52 @@ export function useSession(sessionId: number) {
 
   useEffect(() => { load(); }, [load]);
 
+  async function ensureBridgeRoom(agents: { id: number; name: string; is_scribe: boolean }[]) {
+    if (roomCreatedRef.current) return;
+    const session = await getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+
+    const agentConfigs: { name: string; skillContent: string; apiConfig: { apiBaseUrl: string; apiKey: string; modelName: string } }[] = [];
+    let scribeConfig: { apiBaseUrl: string; apiKey: string; modelName: string } | undefined;
+
+    for (const a of agents) {
+      const saRecords = await getSessionAgents(sessionId);
+      const sa = saRecords.find(s => s.generated_agent_id === a.id || s.agent_id === a.id);
+      const agentRecord = await getAgent(sa?.agent_id ?? a.id);
+      if (!agentRecord) continue;
+
+      // Load SKILL.md content from generated agent
+      let skillContent = '';
+      if (sa?.generated_agent_id != null) {
+        const genAgent = await db.generatedAgents.get(sa.generated_agent_id);
+        if (genAgent) skillContent = genAgent.system_prompt || '';
+      }
+
+      const config = {
+        name: a.name,
+        skillContent,
+        apiConfig: {
+          apiBaseUrl: agentRecord.api_base_url,
+          apiKey: agentRecord.api_key,
+          modelName: agentRecord.model_name,
+        },
+      };
+
+      if (a.is_scribe) {
+        scribeConfig = config.apiConfig;
+      }
+      agentConfigs.push(config);
+    }
+
+    try {
+      await createRoom(sessionId, session.topic, agentConfigs, scribeConfig);
+      roomCreatedRef.current = true;
+    } catch (err: any) {
+      if (!err.message?.includes('409')) throw err;
+      roomCreatedRef.current = true;
+    }
+  }
+
   const handleCreateRound = async (initialMessage: string) => {
     setLoading(true);
     try {
@@ -174,98 +207,52 @@ export function useSession(sessionId: number) {
       const roundId = roundDetail.current_round.id;
       const nonScribeAgents = roundDetail.agents_attached.filter(a => !a.is_scribe);
 
+      // Ensure bridge room exists
+      await ensureBridgeRoom(roundDetail.agents_attached);
+
       // Create empty messages for each agent
-      const entries: { agentId: number; messageId: number }[] = [];
+      const entries: { agentId: number; agentName: string; messageId: number }[] = [];
       for (const a of nonScribeAgents) {
-        const agent = await resolveAgentForLLMCall(a);
-        if (!agent) continue;
         const mid = await createMessage({
           round_id: roundId,
           agent_id: a.id,
           is_human: false,
           content: '',
         });
-        entries.push({ agentId: a.id, messageId: mid });
+        entries.push({ agentId: a.id, agentName: a.name, messageId: mid });
       }
 
       // Refresh detail so UI shows empty agent messages
       const freshDetail = await buildDetail(sessionId, roundDetail.current_round.round_number);
       setRoundDetail(freshDetail);
 
-      // Build context
-      const context = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
-
       // Mark all non-scribe agents as streaming
       const agentIds = nonScribeAgents.map(a => a.id);
       setStreamingAgentIds(new Set(agentIds));
       setStreamContents(Object.fromEntries(agentIds.map(id => [id, ''])));
 
-      // Launch all agent streams in parallel with AbortController
       const abortController = new AbortController();
       abortRef.current = abortController;
 
-      const searchToolDef: ToolDefinition = {
-        type: 'function',
-        function: {
-          name: 'search_web',
-          description: 'Search the web for current, up-to-date information',
-          parameters: {
-            type: 'object',
-            properties: { query: { type: 'string', description: 'The search query' } },
-            required: ['query'],
-          },
-        },
-      };
-
-      const promises = entries.map(async ({ agentId, messageId }) => {
+      const promises = entries.map(async ({ agentId, agentName, messageId }) => {
         try {
-          const agent = await resolveAgentForLLMCall({ id: agentId, name: '', is_scribe: false });
-          if (!agent) return;
-          let prompt = buildSystemPrompt(
-            agent,
-            context,
-            'Provide your unique perspective on this topic. Be creative and specific.',
-          );
+          const saRecords = await getSessionAgents(sessionId);
+          const sa = saRecords.find(s => s.generated_agent_id === agentId || s.agent_id === agentId);
+          const agentRecord = await getAgent(sa?.agent_id ?? agentId);
+          if (!agentRecord) return;
 
-          // Phase 1: Non-streaming call with tools to check for search intent
-          const { tool_calls } = await callAgentWithTools(
-            agent,
-            [{ role: 'system', content: prompt }, { role: 'user', content: 'Please provide your response based on the instructions above.' }],
-            [searchToolDef],
-            4096,
-            abortController.signal,
-          );
-
-          if (tool_calls && tool_calls.length > 0) {
-            setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query: '' } }));
-            for (const tc of tool_calls) {
-              try {
-                const args = JSON.parse(tc.function.arguments);
-                const query = args.query || '';
-                setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query } }));
-                const provider = agent.search_provider
-                  ? { type: agent.search_provider as 'duckduckgo' | 'custom', apiKey: agent.search_api_key || '', apiUrl: agent.search_api_url || '' }
-                  : undefined;
-                const results = await searchWeb(query, provider);
-                const resultsText = results.map(r => `- ${r.title}: ${r.snippet} (${r.url})`).join('\n');
-                prompt = prompt + `\n\n## Web Search Results for "${query}"\n${resultsText || '(No results found)'}`;
-              } catch { /* search failed — proceed without */ }
-            }
-            setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'done', query: '' } }));
-          }
-
-          // Phase 2: Stream final response (no tools, content-only)
           let full = '';
-          for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
+          for await (const token of streamChat(sessionId, agentName, roundDetail.session.topic, {
+            apiBaseUrl: agentRecord.api_base_url,
+            apiKey: agentRecord.api_key,
+            modelName: agentRecord.model_name,
+          }, abortController.signal)) {
             full += token;
             setStreamContents(prev => ({ ...prev, [agentId]: full }));
           }
+
           await updateMessage(messageId, { content: full });
         } finally {
-          setSearchStatus(prev => {
-            const { [agentId]: _, ...rest } = prev;
-            return rest;
-          });
           setStreamContents(prev => {
             const { [agentId]: _, ...rest } = prev;
             return rest;
@@ -289,39 +276,24 @@ export function useSession(sessionId: number) {
 
   const handleMention = async (agentIds: number[], question: string) => {
     if (!roundDetail || agentIds.length === 0) return;
-    setRespondingAgentId(agentIds[0]);
     try {
       const roundId = roundDetail.current_round.id;
-      const context = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
 
-      const searchToolDef: ToolDefinition = {
-        type: 'function',
-        function: {
-          name: 'search_web',
-          description: 'Search the web for current, up-to-date information',
-          parameters: {
-            type: 'object',
-            properties: { query: { type: 'string', description: 'The search query' } },
-            required: ['query'],
-          },
-        },
-      };
+      await ensureBridgeRoom(roundDetail.agents_attached);
 
       for (const agentId of agentIds) {
-        const agent = await resolveAgentForLLMCall({ id: agentId, name: '', is_scribe: false });
-        if (!agent) continue;
+        const saRecords = await getSessionAgents(sessionId);
+        const sa = saRecords.find(s => s.generated_agent_id === agentId || s.agent_id === agentId);
+        const agentRecord = await getAgent(sa?.agent_id ?? agentId);
+        if (!agentRecord) continue;
+
+        const agentName = roundDetail.agents_attached.find(a => a.id === agentId)?.name || '';
+        if (!agentName) continue;
 
         const tid = await createThread({ round_id: roundId, agent_id: agentId });
         await createThreadMessage({ thread_id: tid, is_human: true, content: question });
         const tmid = await createThreadMessage({ thread_id: tid, is_human: false, content: '' });
 
-        let prompt = buildSystemPrompt(
-          agent,
-          context + `\n\n## Private Question\n${question}`,
-          'Respond to the human\'s private question thoughtfully.',
-        );
-
-        // Fire-and-forget streaming per agent with AbortController
         const abortController = new AbortController();
         abortRef.current = abortController;
 
@@ -330,44 +302,17 @@ export function useSession(sessionId: number) {
 
         (async () => {
           try {
-            // Phase 1: Check for search intent
-            const { tool_calls } = await callAgentWithTools(
-              agent,
-              [{ role: 'system', content: prompt }, { role: 'user', content: 'Please provide your response based on the instructions above.' }],
-              [searchToolDef],
-              4096,
-              abortController.signal,
-            );
-
-            if (tool_calls && tool_calls.length > 0) {
-              setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query: '' } }));
-              for (const tc of tool_calls) {
-                try {
-                  const args = JSON.parse(tc.function.arguments);
-                  const query = args.query || '';
-                  setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'searching', query } }));
-                  const provider = agent.search_provider
-                    ? { type: agent.search_provider as 'duckduckgo' | 'custom', apiKey: agent.search_api_key || '', apiUrl: agent.search_api_url || '' }
-                    : undefined;
-                  const results = await searchWeb(query, provider);
-                  const resultsText = results.map(r => `- ${r.title}: ${r.snippet} (${r.url})`).join('\n');
-                  prompt = prompt + `\n\n## Web Search Results for "${query}"\n${resultsText || '(No results found)'}`;
-                } catch { /* search failed */ }
-              }
-              setSearchStatus(prev => ({ ...prev, [agentId]: { status: 'done', query: '' } }));
-            }
-
             let full = '';
-            for await (const token of streamAgentResponse(agent, prompt, 4096, abortController.signal)) {
+            for await (const token of streamChat(sessionId, agentName, question, {
+              apiBaseUrl: agentRecord.api_base_url,
+              apiKey: agentRecord.api_key,
+              modelName: agentRecord.model_name,
+            }, abortController.signal)) {
               full += token;
               setStreamContents(prev => ({ ...prev, [agentId]: full }));
             }
             await updateThreadMessage(tmid, { content: full });
           } finally {
-            setSearchStatus(prev => {
-              const { [agentId]: _, ...rest } = prev;
-              return rest;
-            });
             setStreamContents(prev => {
               const { [agentId]: _, ...rest } = prev;
               return rest;
@@ -382,13 +327,11 @@ export function useSession(sessionId: number) {
         })();
       }
 
-      // Refresh to show threads immediately
       const freshDetail = await buildDetail(sessionId, roundDetail.current_round.round_number);
       setRoundDetail(freshDetail);
     } catch (e: any) {
       setError(e.message);
     }
-    setRespondingAgentId(null);
   };
 
   const handleEndRound = async () => {
@@ -396,12 +339,6 @@ export function useSession(sessionId: number) {
     setLoading(true);
     try {
       const roundId = roundDetail.current_round.id;
-      const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
-      if (!scribeAgentInfo) throw new Error('No scribe agent configured');
-
-      const scribeAgent = await resolveAgentForLLMCall(scribeAgentInfo);
-      if (!scribeAgent) throw new Error('Scribe agent not found');
-
       const messages = await getRoundMessages(roundId);
       const threads = await getRoundThreads(roundId);
 
@@ -420,14 +357,18 @@ export function useSession(sessionId: number) {
         }).join('\n');
       }
 
-      const prompt = buildSystemPrompt(
-        scribeAgent,
-        discussionText,
-        'Summarize this round of discussion concisely. Capture key points, agreements, and disagreements. Be neutral.',
-      );
-      const summary = await callAgent(scribeAgent, prompt);
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      let summary = '';
+      setStreamingScribeContent('');
+      for await (const token of streamScribeSummary(sessionId, [{ name: 'Discussion', content: discussionText }], abortController.signal)) {
+        summary += token;
+        setStreamingScribeContent(summary);
+      }
 
       await updateRound(roundId, { scribe_summary: summary });
+      setStreamingScribeContent(null);
       await load();
     } catch (e: any) {
       setError(e.message);
@@ -438,25 +379,30 @@ export function useSession(sessionId: number) {
   const handleEndSession = async () => {
     if (!roundDetail) return '';
     try {
-      const scribeAgentInfo = roundDetail.agents_attached.find(a => a.is_scribe);
-      if (!scribeAgentInfo) throw new Error('No scribe agent configured');
-
-      const scribeAgent = await resolveAgentForLLMCall(scribeAgentInfo);
-      if (!scribeAgent) throw new Error('Scribe agent not found');
-
       const rounds = await getRounds(sessionId);
       const summaries = rounds.filter(r => r.scribe_summary).map(r =>
         `## Round ${r.round_number}\n${r.scribe_summary}`
       ).join('\n\n');
 
-      const prompt = buildSystemPrompt(
-        scribeAgent,
-        summaries,
-        'Synthesize all round summaries into a comprehensive final report. Identify themes, conclusions, and open questions.',
-      );
-      const report = await callAgent(scribeAgent, prompt);
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      let report = '';
+      setStreamingScribeContent('');
+      for await (const token of streamScribeSummary(sessionId, [{ name: 'All Rounds', content: summaries }], abortController.signal)) {
+        report += token;
+        setStreamingScribeContent(report);
+      }
 
       await updateSession(sessionId, { status: 'completed' });
+      setStreamingScribeContent(null);
+
+      // Clean up bridge room
+      try {
+        await deleteRoom(sessionId);
+      } catch { /* ignore cleanup errors */ }
+      roomCreatedRef.current = false;
+
       return report;
     } catch (e: any) {
       setError(e.message);
@@ -469,6 +415,10 @@ export function useSession(sessionId: number) {
   };
 
   const handleDeleteSession = async () => {
+    try {
+      await deleteRoom(sessionId);
+    } catch { /* ignore */ }
+    roomCreatedRef.current = false;
     await deleteSessionFromDb(sessionId);
   };
 
@@ -484,8 +434,8 @@ export function useSession(sessionId: number) {
   }, [sessionId]);
 
   return {
-    roundDetail, respondingAgentId, loading, error,
-    streamingAgentIds, streamContents, isStreaming, searchStatus,
+    roundDetail, loading, error,
+    streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession,
     handleDeleteSession, fetchSummaries,

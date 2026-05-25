@@ -49,7 +49,7 @@ export async function updateSession(id: number, data: Partial<SessionRecord>): P
 }
 
 export async function deleteSession(id: number): Promise<void> {
-  await db.transaction('rw', [db.rounds, db.threads, db.threadMessages, db.messages, db.generatedAgents], async () => {
+  await db.transaction('rw', [db.rounds, db.threads, db.threadMessages, db.messages, db.generatedAgents, db.sessionAgents, db.sessions], async () => {
     const rounds = await db.rounds.where('session_id').equals(id).toArray();
     const roundIds = rounds.map(r => r.id!);
 
@@ -107,6 +107,7 @@ export async function deleteGeneratedAgentsBySession(sessionId: number): Promise
 export async function createSessionWithGeneratedAgents(
   data: Omit<SessionRecord, 'id' | 'created_at'>,
   generatorAgentId: number,
+  scribeAgentId: number,
   generatedAgents: Omit<GeneratedAgentRecord, 'id' | 'created_at' | 'session_id'>[],
 ): Promise<number> {
   return db.transaction('rw', db.sessions, db.sessionAgents, db.generatedAgents, async () => {
@@ -117,9 +118,9 @@ export async function createSessionWithGeneratedAgents(
       createdIds.push(gaid);
     }
     const rows: SessionAgentRecord[] = [
-      { session_id: sid, agent_id: generatorAgentId, is_scribe: true },
-      ...createdIds.map(gaid => ({ session_id: sid, agent_id: generatorAgentId, generated_agent_id: gaid, is_scribe: false })),
+      { session_id: sid, agent_id: scribeAgentId, is_scribe: true },
     ];
+    rows.push(...createdIds.map(gaid => ({ session_id: sid, agent_id: generatorAgentId, generated_agent_id: gaid, is_scribe: false })));
     await db.sessionAgents.bulkAdd(rows);
     return sid;
   });

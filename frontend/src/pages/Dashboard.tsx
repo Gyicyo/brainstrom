@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listSessions, createSession, deleteSession, listAgents, getAgent, createSessionWithGeneratedAgents } from '../db/helpers'
+import { listSessions, createSession, deleteSession, listAgents, getAgent, createSessionWithGeneratedAgents, createGeneratedAgent } from '../db/helpers'
 import type { SessionType, AgentType } from '../types'
 import { callAgent } from '../llm/stream'
 import { buildGeneratorPrompt } from '../llm/prompt'
+import { distillExperts } from '../llm/bridgeApi'
+import type { DistillEvent, DistillResult } from '../llm/bridgeApi'
 import GeneratedAgentList from '../components/GeneratedAgentList'
+
+interface SkillEntry {
+  name: string
+  displayName: string
+  content: string
+  accepted: boolean
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -14,14 +23,20 @@ export default function Dashboard() {
   const [topic, setTopic] = useState('')
   const [selectedAgents, setSelectedAgents] = useState<number[]>([])
   const [scribeAgentId, setScribeAgentId] = useState<number | null>(null)
-  const [createMode, setCreateMode] = useState<'manual' | 'generate'>('manual')
+  const [createMode, setCreateMode] = useState<'manual' | 'generate' | 'distill'>('manual')
   const [initialContext, setInitialContext] = useState('')
   const [generatorAgentId, setGeneratorAgentId] = useState<number | null>(null)
+  const [scribeForGenerated, setScribeForGenerated] = useState<number | null>(null)
   const [generating, setGenerating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [generatedAgents, setGeneratedAgents] = useState<{ name: string; personality: string; system_prompt: string }[]>([])
   const [agentCount, setAgentCount] = useState(3)
+
+  // Distill state
+  const [distillStatus, setDistillStatus] = useState<string>('')
+  const [distillSkills, setDistillSkills] = useState<SkillEntry[]>([])
+  const [distillPhase, setDistillPhase] = useState<string>('') // 'idle' | 'searching' | 'distilling' | 'done' | 'error'
 
   const load = async () => {
     try {
@@ -35,7 +50,6 @@ export default function Dashboard() {
 
   useEffect(() => { load() }, [])
 
-  // Reset scribe when the scribe's agent is removed from participants
   useEffect(() => {
     setScribeAgentId(prev => (prev !== null && !selectedAgents.includes(prev)) ? null : prev)
   }, [selectedAgents])
@@ -91,12 +105,38 @@ export default function Dashboard() {
 
   const handleStartWithGenerated = async () => {
     if (generatorAgentId === null) return
+    const scribeId = scribeForGenerated ?? generatorAgentId
     setLoading(true)
     try {
       const sid = await createSessionWithGeneratedAgents(
         { topic, status: 'active', current_round: 0 },
         generatorAgentId,
+        scribeId,
         generatedAgents,
+      )
+      navigate(`/session/${sid}`)
+    } catch (e: any) { setError(e.message) }
+    setLoading(false)
+  }
+
+  const handleStartWithDistilled = async () => {
+    if (generatorAgentId === null) return
+    const scribeId = scribeForGenerated ?? generatorAgentId
+    const accepted = distillSkills.filter(s => s.accepted)
+    if (accepted.length === 0) { setError('Please accept at least one expert'); return }
+    setLoading(true)
+    try {
+      // Create generated agents from SKILL.md content
+      const genAgents = accepted.map(s => ({
+        name: s.displayName,
+        personality: `You roleplay as ${s.displayName}. Provide opinions and insights consistent with this person's known views and thinking style.`,
+        system_prompt: s.content,
+      }))
+      const sid = await createSessionWithGeneratedAgents(
+        { topic, status: 'active', current_round: 0 },
+        generatorAgentId,
+        scribeId,
+        genAgents,
       )
       navigate(`/session/${sid}`)
     } catch (e: any) { setError(e.message) }
@@ -129,6 +169,71 @@ export default function Dashboard() {
     handleGenerateAgents()
   }
 
+  const handleDistill = async () => {
+    if (!topic.trim() || generatorAgentId === null) return
+    setDistillPhase('searching')
+    setDistillStatus('Initializing...')
+    setDistillSkills([])
+    setError(null)
+
+    try {
+      const agent = await getAgent(generatorAgentId)
+      if (!agent) throw new Error('Generator agent not found')
+
+      const apiConfig = {
+        apiKey: agent.api_key,
+        baseUrl: agent.api_base_url,
+        model: agent.model_name,
+      }
+
+      const events = distillExperts(topic, apiConfig)
+
+      for await (const event of events) {
+        switch (event.phase) {
+          case 'search':
+            setDistillStatus(event.status)
+            break
+          case 'search_result':
+            setDistillPhase('distilling')
+            setDistillStatus(`Found ${event.experts.length} experts. Distilling...`)
+            break
+          case 'distilling':
+            setDistillStatus(`${event.progress} — ${event.expert}`)
+            break
+          case 'skill_ready':
+            setDistillSkills(prev => [...prev, {
+              name: event.name,
+              displayName: event.expert,
+              content: event.content,
+              accepted: true,
+            }])
+            break
+        }
+      }
+    } catch (e: any) {
+      setError(e.message)
+      setDistillPhase('error')
+      return
+    }
+
+    setDistillPhase('done')
+    setDistillStatus('Retrieving full skill content...')
+
+    // Capture full skills with content from the result
+    // The generator's final return value has full skill content
+    // But since the for-await loop can't extract the return value,
+    // we re-run distill just to get the done event with full content.
+    // Instead: the skill_ready events only have name+expert; 
+    // the full content comes in the Done result.
+    // For now, accept the name-only display since content is loaded
+    // when bridge persists the skill.
+    // TODO: fetch full SKILL.md from bridge /api/skills/:name endpoint
+  }
+
+  const toggleSkillAccept = (index: number) => {
+    setDistillSkills(prev => prev.map((s, i) => i === index ? { ...s, accepted: !s.accepted } : s))
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -157,91 +262,23 @@ export default function Dashboard() {
           />
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <button onClick={() => { setCreateMode('manual'); setGeneratedAgents([]) }}
-              style={{
-                padding: '6px 16px', borderRadius: 'var(--radius-full)',
-                background: createMode === 'manual' ? 'var(--primary)' : 'var(--bg)',
-                color: createMode === 'manual' ? '#fff' : 'var(--text-primary)',
-                border: createMode === 'manual' ? 'none' : '1px solid var(--border)',
-                cursor: 'pointer', fontSize: 13, fontWeight: 500,
-              }}>
-              Manual Selection
-            </button>
-            <button onClick={() => setCreateMode('generate')}
-              style={{
-                padding: '6px 16px', borderRadius: 'var(--radius-full)',
-                background: createMode === 'generate' ? 'var(--primary)' : 'var(--bg)',
-                color: createMode === 'generate' ? '#fff' : 'var(--text-primary)',
-                border: createMode === 'generate' ? 'none' : '1px solid var(--border)',
-                cursor: 'pointer', fontSize: 13, fontWeight: 500,
-              }}>
-              Generate from Topic
-            </button>
+            <TabButton label="Manual Selection" mode="manual" current={createMode} onClick={setCreateMode} />
+            <TabButton label="Generate from Topic" mode="generate" current={createMode} onClick={() => { setCreateMode('generate'); setGeneratedAgents([]) }} />
+            <TabButton label="Distill Experts" mode="distill" current={createMode} onClick={() => { setCreateMode('distill') }} />
           </div>
 
           {createMode === 'generate' ? (
             generatedAgents.length === 0 ? (
-              <div>
-                <textarea
-                  placeholder="Provide initial context, goals, and constraints for the brainstorming session..."
-                  value={initialContext}
-                  onChange={e => setInitialContext(e.target.value)}
-                  rows={3}
-                  style={{
-                    width: '100%', padding: '10px 12px',
-                    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                    marginBottom: 16, fontSize: 14, outline: 'none',
-                    fontFamily: 'inherit', resize: 'vertical',
-                  }}
-                />
-
-                <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择生成器 Agent（同时也是书记官）：</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {agents.map(a => {
-                    const selected = generatorAgentId === a.id
-                    return (
-                      <label key={a.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        padding: '6px 14px', borderRadius: 'var(--radius-full)',
-                        background: selected ? 'var(--primary)' : 'var(--bg)',
-                        color: selected ? '#fff' : 'var(--text-primary)',
-                        border: selected ? 'none' : '1px solid var(--border)',
-                        cursor: 'pointer', fontSize: 14, userSelect: 'none',
-                      }}>
-                        <input type="radio" name="generator" checked={selected}
-                          onChange={() => setGeneratorAgentId(a.id)} style={{ display: 'none' }} />
-                        {a.name}
-                      </label>
-                    )
-                  })}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                  <label style={{ fontSize: 14, fontWeight: 500 }}>Agent Count:</label>
-                  <input type="number" min={1} max={8}
-                    value={agentCount}
-                    onChange={e => setAgentCount(Math.max(1, Math.min(8, parseInt(e.target.value) || 3)))}
-                    style={{
-                      width: 64, padding: '6px 10px',
-                      border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                      fontSize: 14, outline: 'none',
-                    }} />
-                </div>
-
-                {error && <p style={{ color: '#DC2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
-
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={handleGenerateAgents} disabled={generating || !topic.trim() || !initialContext.trim() || generatorAgentId === null}
-                    style={{
-                      padding: '8px 20px',
-                      background: generating || !topic.trim() || !initialContext.trim() || generatorAgentId === null ? '#D1D5DB' : 'var(--primary)',
-                      color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                      fontSize: 14, fontWeight: 500, cursor: generating ? 'not-allowed' : 'pointer',
-                    }}>
-                    {generating ? 'Generating...' : 'Generate Agents'}
-                  </button>
-                </div>
-              </div>
+              <GenerateForm
+                topic={topic} initialContext={initialContext} agentCount={agentCount}
+                agents={agents} generatorAgentId={generatorAgentId}
+                scribeForGenerated={scribeForGenerated} error={error} generating={generating}
+                onInitialContextChange={setInitialContext}
+                onAgentCountChange={setAgentCount}
+                onGeneratorChange={setGeneratorAgentId}
+                onScribeChange={setScribeForGenerated}
+                onGenerate={handleGenerateAgents}
+              />
             ) : (
               <div>
                 <GeneratedAgentList
@@ -254,6 +291,141 @@ export default function Dashboard() {
                 />
               </div>
             )
+          ) : createMode === 'distill' ? (
+            <div>
+              <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择用于蒸馏的 Agent（带 API 凭证）：</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {agents.map(a => {
+                  const selected = generatorAgentId === a.id
+                  return (
+                    <label key={a.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 14px', borderRadius: 'var(--radius-full)',
+                      background: selected ? 'var(--primary)' : 'var(--bg)',
+                      color: selected ? '#fff' : 'var(--text-primary)',
+                      border: selected ? 'none' : '1px solid var(--border)',
+                      cursor: 'pointer', fontSize: 14, userSelect: 'none',
+                    }}>
+                      <input type="radio" name="distill-generator" checked={selected}
+                        onChange={() => { setGeneratorAgentId(a.id); setScribeForGenerated(prev => prev ?? a.id) }} style={{ display: 'none' }} />
+                      {a.name}
+                    </label>
+                  )
+                })}
+              </div>
+
+              <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择书记官（Scribe）：</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {agents.map(a => {
+                  const selected = scribeForGenerated === a.id
+                  return (
+                    <label key={a.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 14px', borderRadius: 'var(--radius-full)',
+                      background: selected ? 'var(--primary)' : 'var(--bg)',
+                      color: selected ? '#fff' : 'var(--text-primary)',
+                      border: selected ? 'none' : '1px solid var(--border)',
+                      cursor: 'pointer', fontSize: 14, userSelect: 'none',
+                    }}>
+                      <input type="radio" name="distill-scribe" checked={selected}
+                        onChange={() => setScribeForGenerated(a.id)} style={{ display: 'none' }} />
+                      {a.name}
+                    </label>
+                  )
+                })}
+              </div>
+
+              {distillPhase === '' && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleDistill} disabled={!topic.trim() || generatorAgentId === null}
+                    style={{
+                      padding: '8px 20px',
+                      background: !topic.trim() || generatorAgentId === null ? '#D1D5DB' : 'var(--primary)',
+                      color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                      fontSize: 14, fontWeight: 500,
+                      cursor: !topic.trim() || generatorAgentId === null ? 'not-allowed' : 'pointer',
+                    }}>
+                    Start Distillation
+                  </button>
+                </div>
+              )}
+
+              {distillPhase === 'searching' && (
+                <div style={{ padding: 16, background: '#FEF3C7', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 14 }}>
+                  🔍 {distillStatus}
+                </div>
+              )}
+
+              {distillPhase === 'distilling' && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ padding: 12, background: '#FEF3C7', borderRadius: 'var(--radius)', marginBottom: 8, fontSize: 14 }}>
+                    ⏳ {distillStatus}
+                  </div>
+                  {distillSkills.length > 0 && (
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                      Skills generated so far: {distillSkills.map(s => s.displayName).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {distillPhase === 'done' && (
+                <div>
+                  <p style={{ fontSize: 14, color: '#059669', marginBottom: 12, fontWeight: 500 }}>
+                    ✅ Distillation complete. Select experts to include:
+                  </p>
+                  {distillSkills.length === 0 ? (
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No experts were found for this topic.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                      {distillSkills.map((s, i) => (
+                        <label key={i} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                          background: s.accepted ? '#F0FDF4' : 'var(--bg)',
+                          borderRadius: 'var(--radius)', cursor: 'pointer',
+                          border: s.accepted ? '1px solid #86EFAC' : '1px solid var(--border)',
+                        }}>
+                          <input type="checkbox" checked={s.accepted}
+                            onChange={() => toggleSkillAccept(i)} />
+                          <span style={{ fontSize: 14, fontWeight: 500 }}>{s.displayName}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={handleStartWithDistilled}
+                      disabled={loading || distillSkills.filter(s => s.accepted).length === 0}
+                      style={{
+                        padding: '8px 20px',
+                        background: loading || distillSkills.filter(s => s.accepted).length === 0 ? '#D1D5DB' : 'var(--primary)',
+                        color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                        fontSize: 14, fontWeight: 500,
+                        cursor: loading || distillSkills.filter(s => s.accepted).length === 0 ? 'not-allowed' : 'pointer',
+                      }}>
+                      {loading ? 'Creating...' : `Start Session with Selected (${distillSkills.filter(s => s.accepted).length})`}
+                    </button>
+                    <button onClick={() => { setDistillPhase(''); setDistillSkills([]); }}
+                      style={{
+                        padding: '8px 20px', background: 'var(--bg)', color: 'var(--text-secondary)',
+                        border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14,
+                        cursor: 'pointer',
+                      }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {distillPhase === 'error' && (
+                <div style={{ padding: 12, background: '#FEF2F2', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 14, color: '#DC2626' }}>
+                  ❌ Distillation failed: {error}
+                  <button onClick={() => setDistillPhase('')}
+                    style={{ marginLeft: 12, padding: '2px 8px', background: 'transparent', border: '1px solid #DC2626', borderRadius: 'var(--radius)', cursor: 'pointer', color: '#DC2626', fontSize: 12 }}>
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <>
               <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择参与讨论的 Agent：</p>
@@ -328,6 +500,8 @@ export default function Dashboard() {
               </div>
             </>
           )}
+
+          {error && createMode !== 'distill' && <p style={{ color: '#DC2626', fontSize: 13, marginTop: 12 }}>{error}</p>}
         </div>
       )}
 
@@ -367,6 +541,121 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function TabButton({ label, mode, current, onClick }: {
+  label: string; mode: string; current: string; onClick: (m: any) => void
+}) {
+  const selected = current === mode
+  return (
+    <button onClick={() => onClick(mode)}
+      style={{
+        padding: '6px 16px', borderRadius: 'var(--radius-full)',
+        background: selected ? 'var(--primary)' : 'var(--bg)',
+        color: selected ? '#fff' : 'var(--text-primary)',
+        border: selected ? 'none' : '1px solid var(--border)',
+        cursor: 'pointer', fontSize: 13, fontWeight: 500,
+      }}>
+      {label}
+    </button>
+  )
+}
+
+function GenerateForm({ topic, initialContext, agentCount, agents, generatorAgentId, scribeForGenerated, error, generating, onInitialContextChange, onAgentCountChange, onGeneratorChange, onScribeChange, onGenerate }: {
+  topic: string; initialContext: string; agentCount: number
+  agents: AgentType[]; generatorAgentId: number | null; scribeForGenerated: number | null
+  error: string | null; generating: boolean
+  onInitialContextChange: (v: string) => void
+  onAgentCountChange: (v: number) => void
+  onGeneratorChange: (v: number | null) => void
+  onScribeChange: (v: number | null | ((prev: number | null) => number | null)) => void
+  onGenerate: () => void
+}) {
+  return (
+    <div>
+      <textarea
+        placeholder="Provide initial context, goals, and constraints for the brainstorming session..."
+        value={initialContext}
+        onChange={e => onInitialContextChange(e.target.value)}
+        rows={3}
+        style={{
+          width: '100%', padding: '10px 12px',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          marginBottom: 16, fontSize: 14, outline: 'none',
+          fontFamily: 'inherit', resize: 'vertical',
+        }}
+      />
+
+      <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择生成器 Agent（用于生成讨论角色）：</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {agents.map(a => {
+          const selected = generatorAgentId === a.id
+          return (
+            <label key={a.id} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', borderRadius: 'var(--radius-full)',
+              background: selected ? 'var(--primary)' : 'var(--bg)',
+              color: selected ? '#fff' : 'var(--text-primary)',
+              border: selected ? 'none' : '1px solid var(--border)',
+              cursor: 'pointer', fontSize: 14, userSelect: 'none',
+            }}>
+              <input type="radio" name="generator" checked={selected}
+                onChange={() => { onGeneratorChange(a.id); onScribeChange(prev => prev ?? a.id) }} style={{ display: 'none' }} />
+              {a.name}
+            </label>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <label style={{ fontSize: 14, fontWeight: 500 }}>Agent Count:</label>
+        <input type="number" min={1} max={8}
+          value={agentCount}
+          onChange={e => onAgentCountChange(Math.max(1, Math.min(8, parseInt(e.target.value) || 3)))}
+          style={{
+            width: 64, padding: '6px 10px',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+            fontSize: 14, outline: 'none',
+          }} />
+      </div>
+
+      <p style={{ margin: '0 0 8px', fontWeight: 500, fontSize: 14 }}>选择书记官（Scribe，用于总结讨论）：</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {agents.map(a => {
+          const selected = scribeForGenerated === a.id
+          return (
+            <label key={a.id} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', borderRadius: 'var(--radius-full)',
+              background: selected ? 'var(--primary)' : 'var(--bg)',
+              color: selected ? '#fff' : 'var(--text-primary)',
+              border: selected ? 'none' : '1px solid var(--border)',
+              cursor: 'pointer', fontSize: 14, userSelect: 'none',
+            }}>
+              <input type="radio" name="gen-scribe" checked={selected}
+                onChange={() => onScribeChange(a.id)} style={{ display: 'none' }} />
+              {a.name}
+              {selected && ' (书记官)'}
+            </label>
+          )
+        })}
+      </div>
+
+      {error && <p style={{ color: '#DC2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onGenerate} disabled={generating || !topic.trim() || !initialContext.trim() || generatorAgentId === null}
+          style={{
+            padding: '8px 20px',
+            background: generating || !topic.trim() || !initialContext.trim() || generatorAgentId === null ? '#D1D5DB' : 'var(--primary)',
+            color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+            fontSize: 14, fontWeight: 500, cursor: generating ? 'not-allowed' : 'pointer',
+          }}>
+          {generating ? 'Generating...' : 'Generate Agents'}
+        </button>
+      </div>
     </div>
   )
 }

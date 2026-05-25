@@ -113,7 +113,7 @@ Be thorough. Research deeply. Return the COMPLETE SKILL.md.`,
       const skillName = nameMatch ? nameMatch[1].trim() : expert.toLowerCase().replace(/\s+/g, '-');
 
       skills.push({ name: skillName, displayName: expert, content: skillContent });
-      onProgress({ phase: 'skill_ready', expert, name: skillName });
+      onProgress({ phase: 'skill_ready', expert, name: skillName, content: skillContent });
     } finally {
       distillAgent.dispose();
     }

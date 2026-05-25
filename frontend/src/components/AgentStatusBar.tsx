@@ -6,11 +6,10 @@ interface AgentInfo {
 
 interface Props {
   agents: AgentInfo[];
-  respondingAgentId?: number | null;
   streamingAgentIds?: Set<number>;
 }
 
-export default function AgentStatusBar({ agents, respondingAgentId, streamingAgentIds }: Props) {
+export default function AgentStatusBar({ agents, streamingAgentIds }: Props) {
   const nonScribe = agents.filter(a => !a.is_scribe)
 
   return (
@@ -21,9 +20,8 @@ export default function AgentStatusBar({ agents, respondingAgentId, streamingAge
       flexWrap: 'wrap', minHeight: 20,
     }}>
       {nonScribe.map(a => {
-        const isResponding = a.id === respondingAgentId
         const isStreaming = streamingAgentIds?.has(a.id)
-        const active = isResponding || isStreaming
+        const active = isStreaming
         return (
           <div key={a.id} style={{
             display: 'flex', alignItems: 'center', gap: 6,
@@ -39,8 +37,7 @@ export default function AgentStatusBar({ agents, respondingAgentId, streamingAge
               transition: 'background 0.15s',
             }} />
             {a.name}
-            {isResponding && ' (responding...)'}
-            {isStreaming && !isResponding && (
+            {isStreaming && (
               <span style={{ display: 'inline-flex', alignItems: 'center', marginLeft: 2 }}>
                 <span className="thinking-dots" style={{ gap: 2 }}>
                   <span className="thinking-dot" style={{ width: 4, height: 4 }} />

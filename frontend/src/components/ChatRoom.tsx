@@ -1,34 +1,86 @@
 import { useState, useEffect, useRef } from 'react'
+import { db } from '../db/db'
+import { getRounds, getRoundMessages, getSessionAgents } from '../db/helpers'
 import MessageBubble from './MessageBubble'
-import SearchIndicator from './SearchIndicator'
+
 import RoundDivider from './RoundDivider'
 import AgentStatusBar from './AgentStatusBar'
 import type { RoundDetailType } from '../types'
 
+interface RoundHistory {
+  round_number: number;
+  scribe_summary: string;
+  messages: { agent_name: string; content: string; is_human: boolean }[];
+}
+
 interface Props {
+  sessionId: number;
   roundDetail: RoundDetailType | null;
   onSendMention: (agentIds: number[], question: string) => void;
   onCreateRound: (initialMessage: string) => void;
   onStartDivergent: () => void;
   onStartNextRound: () => void;
   onEndRound: () => void;
-  respondingAgentId: number | null;
   loading: boolean;
   streamingAgentIds?: Set<number>;
   streamContents?: Record<number, string>;
   isStreaming?: boolean;
-  searchStatus?: Record<number, { status: string; query?: string }>;
+  streamingScribeContent?: string | null;
 }
 
 export default function ChatRoom({
-  roundDetail, onSendMention, onCreateRound, onStartDivergent,
-  onStartNextRound, onEndRound, respondingAgentId, loading,
-  streamingAgentIds, streamContents, isStreaming, searchStatus,
+  sessionId, roundDetail, onSendMention, onCreateRound, onStartDivergent,
+  onStartNextRound, onEndRound, loading,
+  streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [mentionText, setMentionText] = useState('')
   const [selectedAgentIds, setSelectedAgentIds] = useState<number[]>([])
   const [initialContext, setInitialContext] = useState('')
+  const [history, setHistory] = useState<RoundHistory[]>([])
+  const [expandedRound, setExpandedRound] = useState<number | null>(null)
+
+  // Load previous rounds when roundDetail changes
+  useEffect(() => {
+    if (!roundDetail) return
+    const currentNum = roundDetail.current_round.round_number
+    if (currentNum <= 1) { setHistory([]); return }
+
+    ;(async () => {
+      const [rounds, saRecords] = await Promise.all([
+        getRounds(sessionId),
+        getSessionAgents(sessionId),
+      ])
+      const genAgentIds = saRecords.filter(sa => sa.generated_agent_id != null).map(sa => sa.generated_agent_id!)
+      const genAgents = genAgentIds.length > 0 ? await db.generatedAgents.bulkGet(genAgentIds) : []
+      const genNameMap = new Map(genAgents.filter(Boolean).map(a => [a!.id!, a!.name]))
+      const presetAgentIds = [...new Set(saRecords.map(sa => sa.agent_id))]
+      const presetAgents = presetAgentIds.length > 0 ? await db.agents.bulkGet(presetAgentIds) : []
+      const presetNameMap = new Map(presetAgents.filter(Boolean).map(a => [a!.id!, a!.name]))
+
+      function agentName(mid: number): string {
+        const sa = saRecords.find(s => s.generated_agent_id === mid)
+        if (sa) return genNameMap.get(mid) || 'Unknown'
+        return presetNameMap.get(mid) || 'Unknown'
+      }
+
+      const prev: RoundHistory[] = []
+      for (const r of rounds) {
+        if (r.round_number >= currentNum) continue
+        const msgs = await getRoundMessages(r.id!)
+        prev.push({
+          round_number: r.round_number,
+          scribe_summary: r.scribe_summary || '',
+          messages: msgs.map(m => ({
+            agent_name: m.is_human ? 'Human' : (m.agent_id != null ? agentName(m.agent_id) : ''),
+            content: m.content,
+            is_human: m.is_human,
+          })),
+        })
+      }
+      setHistory(prev)
+    })()
+  }, [roundDetail, sessionId])
 
   const toggleAgent = (id: number) => {
     setSelectedAgentIds(prev =>
@@ -99,7 +151,6 @@ export default function ChatRoom({
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <AgentStatusBar
         agents={agents_attached}
-        respondingAgentId={respondingAgentId}
         streamingAgentIds={streamingAgentIds}
       />
 
@@ -128,6 +179,58 @@ export default function ChatRoom({
         borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
         padding: 16, marginBottom: 12,
       }}>
+        {/* Previous rounds — collapsible history */}
+        {history.map(h => (
+          <div key={h.round_number} style={{ marginBottom: 16 }}>
+            <div onClick={() => setExpandedRound(expandedRound === h.round_number ? null : h.round_number)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 12px', background: 'var(--bg)',
+                borderRadius: 'var(--radius)', cursor: 'pointer',
+                border: '1px solid var(--border)', userSelect: 'none',
+              }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                {expandedRound === h.round_number ? '▼' : '▶'} Round {h.round_number}
+              </span>
+              {h.scribe_summary && (
+                <span style={{
+                  fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                }}>
+                  {h.scribe_summary.slice(0, 80)}...
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {h.messages.filter(m => !m.is_human).length} replies
+              </span>
+            </div>
+
+            {expandedRound === h.round_number && (
+              <div style={{ marginTop: 8 }}>
+                {h.messages.filter(m => m.content).map((m, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: m.is_human ? 'var(--accent)' : 'var(--primary)', marginBottom: 2 }}>
+                      {m.agent_name}
+                    </div>
+                    <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+                {h.scribe_summary && (
+                  <div style={{
+                    marginTop: 8, padding: 10, background: 'var(--primary-light)',
+                    borderRadius: 'var(--radius)', borderLeft: '3px solid var(--primary)', fontSize: 13,
+                  }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 4 }}>Scribe Summary</div>
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{h.scribe_summary}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+
         <RoundDivider roundNumber={current_round.round_number} />
 
         {/* Public messages */}
@@ -143,11 +246,6 @@ export default function ChatRoom({
                 isHuman={m.is_human}
                 streamingContent={m.agent_id !== null ? streamContents?.[m.agent_id] : undefined}
               />
-              {!m.is_human && m.agent_id != null && (
-                <div style={{ marginLeft: 48, marginTop: -6, marginBottom: 8 }}>
-                  <SearchIndicator searchStatus={searchStatus?.[m.agent_id] as any} />
-                </div>
-              )}
             </div>
           ))
         )}
@@ -167,27 +265,22 @@ export default function ChatRoom({
                   id: tm.id, agent_id: null, agent_name: tm.is_human ? 'You' : t.agent_name,
                   is_human: tm.is_human, content: tm.content, created_at: tm.created_at,
                 }} isHuman={tm.is_human} />
-                {!tm.is_human && (
-                  <div style={{ marginLeft: 48, marginTop: -6, marginBottom: 8 }}>
-                    <SearchIndicator searchStatus={searchStatus?.[t.agent_id] as any} />
-                  </div>
-                )}
               </div>
             ))}
           </div>
         ))}
 
         {/* Scribe summary */}
-        {current_round.scribe_summary && (
+        {(current_round.scribe_summary || streamingScribeContent) && (
           <div style={{
             marginTop: 16, padding: 14, background: 'var(--primary-light)',
             borderRadius: 'var(--radius)', borderLeft: '3px solid var(--primary)',
           }}>
             <div style={{ fontSize: 12, color: 'var(--primary)', marginBottom: 6, fontWeight: 600 }}>
-              Scribe Summary
+              {streamingScribeContent ? 'Scribe is summarizing...' : 'Scribe Summary'}
             </div>
             <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-              {current_round.scribe_summary}
+              {streamingScribeContent || current_round.scribe_summary}
             </div>
           </div>
         )}

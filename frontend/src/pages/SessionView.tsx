@@ -39,8 +39,8 @@ export default function SessionView() {
   const sessionId = Number(id)
 
   const {
-    roundDetail, respondingAgentId, loading, error,
-    streamingAgentIds, streamContents, isStreaming, searchStatus,
+    roundDetail, loading, error,
+    streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession, handleDeleteSession,
     fetchSummaries,
@@ -178,18 +178,18 @@ export default function SessionView() {
         {/* ChatRoom fills remaining height */}
         <div style={{ flex: 1, minHeight: 0 }}>
           <ChatRoom
+            sessionId={sessionId}
             roundDetail={roundDetail}
             onSendMention={handleMention}
             onCreateRound={handleCreateRound}
             onStartDivergent={handleStartDivergent}
             onStartNextRound={handleStartNextRound}
             onEndRound={handleEndRound}
-            respondingAgentId={respondingAgentId}
             loading={loading}
             streamingAgentIds={streamingAgentIds}
             streamContents={streamContents}
             isStreaming={isStreaming}
-            searchStatus={searchStatus}
+            streamingScribeContent={streamingScribeContent}
           />
         </div>
       </div>
