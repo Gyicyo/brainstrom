@@ -13,9 +13,10 @@ app.get('/api/health', (req, res) => {
 });
 
 import roomRoutes from './routes/rooms.js';
-app.use('/api/room', roomRoutes);
+import distillRoutes from './routes/distill.js';
 
-// Distill routes will be mounted in Task 7
+app.use('/api/room', roomRoutes);
+app.use('/api/distill', distillRoutes);
 
 app.listen(PORT, () => {
   console.log(`Bridge server running on http://localhost:${PORT}`);
