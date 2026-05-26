@@ -48,8 +48,8 @@ bridge/
 | `frontend/` | `npm run preview` | Preview production build |
 | `bridge/`   | `npm start` | Start bridge server (port 3001) |
 | `bridge/`   | `npm run dev` | Start with `--watch` |
-| `bridge/`   | `npm test` | Run bridge test suite (Vitest) |
-| `bridge/`   | `npm run test:watch` | Watch mode |
+| `bridge/`   | `npm test` | No tests present (file removed) |
+| `bridge/`   | `npm run test:watch` | No tests present |
 
 ## Logging System
 
@@ -133,6 +133,10 @@ Phases per round: Starting → Divergent (parallel streaming) → Mention (threa
 ## API Compatibility
 
 LLM calls go to `{api_base_url}/chat/completions` with OpenAI-style payload (Bearer auth). The bridge abstracts this; per-agent API config is passed at room creation. Tested with OpenAI, DeepSeek, Anthropic via proxy, and local LLMs.
+
+## Mandatory: Read Coding Guidelines First
+
+**Before writing any code, all agents MUST read `docs/coding规范/index.md`.** This file contains critical rules about secrets handling, route safety, state management, and code cleanliness derived from past technical debt audits. Violations will be rejected in code review.
 
 ## Agent Behavior Rules
 

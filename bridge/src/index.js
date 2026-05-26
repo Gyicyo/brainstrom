@@ -17,14 +17,16 @@ import distillRoutes from './routes/distill.js';
 import distillRolesRoutes from './routes/distillRoles.js';
 import completeRoutes from './routes/complete.js';
 import suggestRolesRoutes from './routes/suggestRoles.js';
-import testToolsRoutes from './routes/test-tools.js';
+if (process.env.NODE_ENV === 'development') {
+  const { default: testToolsRoutes } = await import('./routes/test-tools.js');
+  app.use('/api/test-tools', testToolsRoutes);
+}
 
 app.use('/api/room', roomRoutes);
 app.use('/api/distill', distillRoutes);
 app.use('/api/distill-roles', distillRolesRoutes);
 app.use('/api/complete', completeRoutes);
 app.use('/api/suggest-roles', suggestRolesRoutes);
-app.use('/api/test-tools', testToolsRoutes);
 
 export { app };
 

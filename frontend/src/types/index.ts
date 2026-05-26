@@ -1,18 +1,3 @@
-export interface AgentType {
-  id: number;
-  name: string;
-  personality: string;
-  system_prompt: string;
-  api_base_url: string;
-  api_key: string;
-  model_name: string;
-  avatar_url: string;
-  search_provider?: string;
-  search_api_key?: string;
-  search_api_url?: string;
-  created_at: string;
-}
-
 export interface SessionType {
   id: number;
   topic: string;
@@ -67,19 +52,6 @@ export interface GeneratedAgentType {
   system_prompt: string;
   session_id: number;
   created_at: string;
-}
-
-export interface NewAgentInput {
-  name: string;
-  personality: string;
-  system_prompt: string;
-  api_base_url: string;
-  api_key: string;
-  model_name: string;
-  avatar_url: string;
-  search_provider?: string;
-  search_api_key?: string;
-  search_api_url?: string;
 }
 
 export interface NewSessionInput {

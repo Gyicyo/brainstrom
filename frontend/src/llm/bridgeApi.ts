@@ -1,4 +1,4 @@
-const BRIDGE_URL = 'http://localhost:3001';
+const BRIDGE_URL = (import.meta as any).env?.VITE_BRIDGE_URL || 'http://localhost:3001';
 
 export async function* streamChat(
   sessionId: number,
@@ -200,6 +200,7 @@ export interface DistillResult {
 
 export type DistillRolesEvent =
   | { phase: 'batch_start'; roles: { name: string }[] }
+  | { phase: 'distill_start'; expert: string }
   | { phase: 'skill_ready'; expert: string }
   | { phase: 'distill_error'; expert: string; error: string };
 

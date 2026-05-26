@@ -39,7 +39,7 @@ export default function SessionView() {
   const sessionId = Number(id)
 
   const {
-    roundDetail, loading, error,
+    roundDetail, loading, error, pendingRoundInput,
     streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession, handleDeleteSession,
@@ -186,6 +186,7 @@ export default function SessionView() {
             onStartNextRound={handleStartNextRound}
             onEndRound={handleEndRound}
             loading={loading}
+            pendingRoundInput={pendingRoundInput}
             streamingAgentIds={streamingAgentIds}
             streamContents={streamContents}
             isStreaming={isStreaming}

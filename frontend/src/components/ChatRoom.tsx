@@ -22,6 +22,7 @@ interface Props {
   onStartNextRound: () => void;
   onEndRound: () => void;
   loading: boolean;
+  pendingRoundInput?: boolean;
   streamingAgentIds?: Set<number>;
   streamContents?: Record<number, string>;
   isStreaming?: boolean;
@@ -30,13 +31,14 @@ interface Props {
 
 export default function ChatRoom({
   sessionId, roundDetail, onSendMention, onCreateRound, onStartDivergent,
-  onStartNextRound, onEndRound, loading,
+  onStartNextRound, onEndRound, loading, pendingRoundInput,
   streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [mentionText, setMentionText] = useState('')
   const [selectedAgentIds, setSelectedAgentIds] = useState<number[]>([])
   const [initialContext, setInitialContext] = useState('')
+  const [nextRoundContext, setNextRoundContext] = useState('')
   const [history, setHistory] = useState<RoundHistory[]>([])
   const [expandedRound, setExpandedRound] = useState<number | null>(null)
 
@@ -311,8 +313,43 @@ export default function ChatRoom({
         <div ref={bottomRef} />
       </div>
 
+      {/* Pending round input — user speaks before next round */}
+      {pendingRoundInput && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          gap: 12, padding: 24, flexShrink: 0,
+        }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, textAlign: 'center' }}>
+            请输入第 {current_round.round_number + 1} 轮的讨论方向...
+          </p>
+          <textarea
+            value={nextRoundContext}
+            onChange={e => setNextRoundContext(e.target.value)}
+            placeholder="描述你希望各角色在本轮讨论的话题..."
+            rows={3}
+            style={{
+              width: '100%', padding: 12, border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
+              resize: 'vertical', fontFamily: 'inherit',
+            }}
+          />
+          <button
+            onClick={() => { onCreateRound(nextRoundContext); setNextRoundContext('') }}
+            disabled={loading || !nextRoundContext.trim()}
+            style={{
+              padding: '10px 28px',
+              background: loading || !nextRoundContext.trim() ? '#D1D5DB' : 'var(--primary)',
+              color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+              cursor: loading || !nextRoundContext.trim() ? 'not-allowed' : 'pointer',
+              fontSize: 14, fontWeight: 500,
+            }}>
+            {loading ? '发送中...' : '发送'}
+          </button>
+        </div>
+      )}
+
       {/* State C: Full controls — only after divergent has started */}
-      {hasDivergentStarted && (
+      {hasDivergentStarted && !pendingRoundInput && (
         <>
           {/* @mention area — multi-select pills + text input */}
           <div style={{ marginBottom: 12, flexShrink: 0 }}>
@@ -391,15 +428,6 @@ export default function ChatRoom({
                 cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
               结束本轮并总结
-            </button>
-            <button onClick={onStartNextRound} disabled={loading || !!isStreaming}
-              style={{
-                padding: '8px 20px',
-                background: loading || isStreaming ? '#D1D5DB' : 'var(--primary)',
-                color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
-              }}>
-              开始下一轮
             </button>
           </div>
         </>

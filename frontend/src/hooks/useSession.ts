@@ -8,6 +8,7 @@ import {
   deleteSession as deleteSessionFromDb,
 } from '../db/helpers';
 import { streamChat, streamScribeSummary, createRoom, deleteRoom, resumeRoom } from '../llm/bridgeApi';
+import { buildDivergentContext } from '../llm/prompt';
 import { loadLLMConfig } from '../pages/LLMConfig';
 import type { RoundDetailType } from '../types';
 
@@ -23,12 +24,15 @@ export function useSession(sessionId: number) {
   const [streamingAgentIds, setStreamingAgentIds] = useState<Set<number>>(new Set());
   const [streamContents, setStreamContents] = useState<Record<number, string>>({});
   const [streamingScribeContent, setStreamingScribeContent] = useState<string | null>(null);
+  const [pendingRoundInput, setPendingRoundInput] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  const syncedRef = useRef(false);
 
   useEffect(() => {
+    syncedRef.current = false;
     return () => { abortRef.current?.abort(); };
-  }, []);
+  }, [sessionId]);
 
   const isStreaming = streamingAgentIds.size > 0;
 
@@ -122,7 +126,12 @@ export function useSession(sessionId: number) {
       if (!session) { setRoundDetail(null); return; }
       const round = await getCurrentRound(sessionId, session.current_round);
       if (!round) { setRoundDetail(null); return; }
-      setRoundDetail(await buildRoundDetail(session, round));
+      const detail = await buildRoundDetail(session, round);
+      setRoundDetail(detail);
+      if (!syncedRef.current && session.status === 'active' && detail.agents_attached.length > 0) {
+        syncedRef.current = true;
+        ensureBridgeRoom(detail.agents_attached).catch(() => {});
+      }
     } catch {
       setRoundDetail(null);
     }
@@ -158,6 +167,7 @@ export function useSession(sessionId: number) {
 
   const handleCreateRound = async (initialMessage: string) => {
     setLoading(true);
+    setPendingRoundInput(false);
     try {
       const session = await getSession(sessionId);
       if (!session) throw new Error('未找到会话');
@@ -169,7 +179,6 @@ export function useSession(sessionId: number) {
       if (initialMessage) {
         await createMessage({ round_id: rid, agent_id: null, is_human: true, content: initialMessage });
       }
-
       const detail = await buildDetail(sessionId, nextNum);
       setRoundDetail(detail);
     } catch (e: any) {
@@ -209,10 +218,13 @@ export function useSession(sessionId: number) {
       const abortController = new AbortController();
       abortRef.current = abortController;
 
+      const divergentContext = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
+      const userMessage = divergentContext || roundDetail.session.topic;
+
       const promises = entries.map(async ({ agentId, agentName, messageId }) => {
         try {
           let full = '';
-          for await (const token of streamChat(sessionId, agentName, roundDetail.session.topic, abortController.signal)) {
+          for await (const token of streamChat(sessionId, agentName, userMessage, abortController.signal)) {
             full += token;
             setStreamContents(prev => ({ ...prev, [agentId]: full }));
           }
@@ -260,10 +272,13 @@ export function useSession(sessionId: number) {
         setStreamingAgentIds(prev => new Set(prev).add(agentId));
         setStreamContents(prev => ({ ...prev, [agentId]: '' }));
 
+        const mentionContext = await buildDivergentContext(sessionId, roundDetail.current_round.round_number, roundId);
+        const fullQuestion = mentionContext ? `${mentionContext}\n\n【追问】\n${question}` : question;
+
         (async () => {
           try {
             let full = '';
-            for await (const token of streamChat(sessionId, agentName, question, abortController.signal)) {
+            for await (const token of streamChat(sessionId, agentName, fullQuestion, abortController.signal)) {
               full += token;
               setStreamContents(prev => ({ ...prev, [agentId]: full }));
             }
@@ -326,6 +341,7 @@ export function useSession(sessionId: number) {
       await updateRound(roundId, { scribe_summary: summary });
       setStreamingScribeContent(null);
       await load();
+      setPendingRoundInput(true);
     } catch (e: any) {
       setError(e.message);
     }
@@ -365,7 +381,7 @@ export function useSession(sessionId: number) {
   };
 
   const handleStartNextRound = async () => {
-    await handleCreateRound('');
+    setPendingRoundInput(true);
   };
 
   const handleDeleteSession = async () => {
@@ -385,7 +401,7 @@ export function useSession(sessionId: number) {
   }, [sessionId]);
 
   return {
-    roundDetail, loading, error,
+    roundDetail, loading, error, pendingRoundInput,
     streamingAgentIds, streamContents, isStreaming, streamingScribeContent,
     handleCreateRound, handleStartDivergent, handleStartNextRound,
     handleEndRound, handleMention, handleEndSession,

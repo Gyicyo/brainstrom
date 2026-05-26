@@ -2,16 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listSessions, deleteSession, createSessionWithRoles } from '../db/helpers'
 import type { SessionType } from '../types'
-import { distillExperts, suggestRoles, distillRoles, createRoom } from '../llm/bridgeApi'
+import { suggestRoles, distillRoles, createRoom, deleteRoom } from '../llm/bridgeApi'
 import { loadLLMConfig } from './LLMConfig'
 import type { LLMConfigType } from './LLMConfig'
-
-interface SkillEntry {
-  name: string
-  displayName: string
-  content: string
-  accepted: boolean
-}
 
 interface RoleEntry {
   name: string
@@ -23,7 +16,6 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState<SessionType[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [topic, setTopic] = useState('')
-  const [createMode, setCreateMode] = useState<'search' | 'distill'>('search')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,13 +30,7 @@ export default function Dashboard() {
   const [distillRolesPhase, setDistillRolesPhase] = useState<string>('')
   const [distilledTopic, setDistilledTopic] = useState('')
   const [distilledRoles, setDistilledRoles] = useState<{ name: string; bio: string; skillContent: string }[]>([])
-  const [roleStatuses, setRoleStatuses] = useState<{ name: string; status: 'pending' | 'done' | 'error'; error?: string }[]>([])
-
-  // Distill state
-  const [distillStatus, setDistillStatus] = useState<string>('')
-  const [distillSkills, setDistillSkills] = useState<SkillEntry[]>([])
-  const [distillPhase, setDistillPhase] = useState<string>('')
-  const [distillContext, setDistillContext] = useState('')
+  const [roleStatuses, setRoleStatuses] = useState<{ name: string; status: 'pending' | 'distilling' | 'done' | 'error'; error?: string }[]>([])
 
   const [llmConfig, setLlmConfig] = useState<LLMConfigType>(loadLLMConfig)
 
@@ -63,7 +49,7 @@ export default function Dashboard() {
   const handleDelete = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation()
     if (!confirm('删除此会话及其所有数据？此操作不可撤销。')) return
-    try { await deleteSession(id); load() } catch (e) { console.error(e) }
+    try { await deleteRoom(id); await deleteSession(id); load() } catch (e) { console.error(e) }
   }
 
   const handleSearchRoles = async () => {
@@ -118,6 +104,9 @@ export default function Dashboard() {
         switch (event.phase) {
           case 'batch_start':
             setRoleStatuses(event.roles.map(r => ({ name: r.name, status: 'pending' as const })))
+            break
+          case 'distill_start':
+            setRoleStatuses(prev => prev.map(r => r.name === event.expert ? { ...r, status: 'distilling' as const } : r))
             break
           case 'skill_ready':
             setRoleStatuses(prev => prev.map(r => r.name === event.expert ? { ...r, status: 'done' } : r))
@@ -183,54 +172,22 @@ export default function Dashboard() {
     setSearchResults(prev => prev.map((r, i) => i === index ? { ...r, [field]: value.trim() } : r))
   }
 
-  const handleDistill = async () => {
-    if (!topic.trim()) return
-    if (!llmConfig.apiKey) { setError('请在 LLM 设置中填写 API Key'); return }
-    setDistillPhase('searching')
-    setDistillStatus('初始化中...')
-    setDistillSkills([])
-    setError(null)
-
-    try {
-      const apiConfig = {
-        apiKey: llmConfig.apiKey,
-        apiBaseUrl: llmConfig.baseUrl,
-        modelName: llmConfig.modelName,
-      }
-
-      const events = distillExperts(topic, apiConfig, distillContext)
-
-      for await (const event of events) {
-        switch (event.phase) {
-          case 'search':
-            setDistillStatus(event.status); break
-          case 'search_result':
-            setDistillPhase('distilling')
-            setDistillStatus(`找到 ${event.experts.length} 个专家。开始蒸馏...`); break
-          case 'distilling':
-            setDistillStatus(`${event.progress} — ${event.expert}`); break
-          case 'skill_ready':
-            setDistillSkills(prev => [...prev, {
-              name: event.name, displayName: event.expert, content: event.content, accepted: true,
-            }]); break
-        }
-      }
-    } catch (e: any) {
-      setError(e.message)
-      setDistillPhase('error')
-      return
-    }
-
-    setDistillPhase('done')
-    setDistillStatus('完成。')
-  }
-
-  const toggleSkillAccept = (index: number) => {
-    setDistillSkills(prev => prev.map((s, i) => i === index ? { ...s, accepted: !s.accepted } : s))
-  }
-
   return (
     <div>
+      <style>{`
+@keyframes distillSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes distillPulse {
+  0%, 100% { border-color: #FDE68A; }
+  50% { border-color: #F59E0B; }
+}
+@keyframes charWave {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+`}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>会话列表</h1>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -260,17 +217,11 @@ export default function Dashboard() {
             }}
           />
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <TabButton label="搜索选择" mode="search" current={createMode} onClick={() => { setCreateMode('search'); setSearchStatus('idle'); setSearchResults([]) }} />
-            <TabButton label="蒸馏专家" mode="distill" current={createMode} onClick={() => setCreateMode('distill')} />
-          </div>
-
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, padding: '8px 12px', background: '#F0F9FF', borderRadius: 'var(--radius)' }}>
             当前模型: {llmConfig.modelName} @ {llmConfig.baseUrl}
           </div>
 
-          {createMode === 'search' ? (
-            <div>
+          <div>
               {searchStatus === 'idle' && (
                 <div>
                   <textarea
@@ -396,20 +347,40 @@ export default function Dashboard() {
                           <div key={i} style={{
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '6px 12px', borderRadius: 'var(--radius)',
-                            background: r.status === 'done' ? '#F0FDF4' : r.status === 'error' ? '#FEF2F2' : '#FFF7ED',
+                            background: r.status === 'done' ? '#F0FDF4' : r.status === 'error' ? '#FEF2F2' : r.status === 'distilling' ? '#FFFBED' : '#FFF7ED',
                             border: `1px solid ${
-                              r.status === 'done' ? '#86EFAC' : r.status === 'error' ? '#FCA5A5' : '#FDE68A'
+                              r.status === 'done' ? '#86EFAC' : r.status === 'error' ? '#FCA5A5' : r.status === 'distilling' ? '#F59E0B' : '#FDE68A'
                             }`,
                             fontSize: 14,
+                            ...(r.status === 'distilling' ? { animation: 'distillPulse 1.5s ease-in-out infinite' } : {}),
                           }}>
                             <span style={{ flexShrink: 0 }}>
                               {r.status === 'pending' && '⏳'}
+                              {r.status === 'distilling' && (
+                                <span style={{
+                                  display: 'inline-block', width: 14, height: 14,
+                                  border: '2px solid #FDE68A',
+                                  borderTopColor: '#F59E0B',
+                                  borderRadius: '50%',
+                                  animation: 'distillSpin 0.7s linear infinite',
+                                }} />
+                              )}
                               {r.status === 'done' && '✅'}
                               {r.status === 'error' && '❌'}
                             </span>
                             <span style={{ flex: 1, fontWeight: 500 }}>{r.name}</span>
                             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                               {r.status === 'pending' && '等待中'}
+                              {r.status === 'distilling' && (
+                                <span style={{ display: 'inline-flex', color: '#10B981' }}>
+                                  {'蒸馏中...'.split('').map((ch, ci) => (
+                                    <span key={ci} style={{
+                                      display: 'inline-block',
+                                      animation: `charWave 5s ease-in-out ${ci * 0.3}s infinite`,
+                                    }}>{ch}</span>
+                                  ))}
+                                </span>
+                              )}
                               {r.status === 'done' && '已完成'}
                               {r.status === 'error' && `失败: ${r.error || ''}`}
                             </span>
@@ -452,108 +423,8 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-          ) : (
-            <div>
-              <textarea
-                value={distillContext}
-                onChange={e => setDistillContext(e.target.value)}
-                placeholder="可选的上下文——描述你需要这些专家做什么..."
-                rows={3}
-                style={{
-                  width: '100%', padding: 10, border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)', fontSize: 13, outline: 'none',
-                  resize: 'vertical', fontFamily: 'inherit', marginBottom: 12,
-                }}
-              />
 
-              {distillPhase === '' && (
-                <button onClick={handleDistill} disabled={!topic.trim()}
-                  style={{
-                    padding: '8px 20px',
-                    background: !topic.trim() ? '#D1D5DB' : 'var(--primary)',
-                    color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                    fontSize: 14, fontWeight: 500, cursor: !topic.trim() ? 'not-allowed' : 'pointer',
-                  }}>
-                    开始蒸馏
-                </button>
-              )}
-
-              {distillPhase === 'searching' && (
-                <div style={{ padding: 16, background: '#FEF3C7', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 14 }}>
-                  🔍 {distillStatus}
-                </div>
-              )}
-
-              {distillPhase === 'distilling' && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ padding: 12, background: '#FEF3C7', borderRadius: 'var(--radius)', marginBottom: 8, fontSize: 14 }}>
-                    ⏳ {distillStatus}
-                  </div>
-                  {distillSkills.length > 0 && (
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      技能: {distillSkills.map(s => s.displayName).join(', ')}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {distillPhase === 'done' && (
-                <div>
-                  <p style={{ fontSize: 14, color: '#059669', marginBottom: 12, fontWeight: 500 }}>
-                    ✅ 蒸馏完成。选择要包含的专家：
-                  </p>
-                  {distillSkills.length === 0 ? (
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>未找到专家。</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                      {distillSkills.map((s, i) => (
-                        <label key={i} style={{
-                          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                          background: s.accepted ? '#F0FDF4' : 'var(--bg)',
-                          borderRadius: 'var(--radius)', cursor: 'pointer',
-                          border: s.accepted ? '1px solid #86EFAC' : '1px solid var(--border)',
-                        }}>
-                          <input type="checkbox" checked={s.accepted} onChange={() => toggleSkillAccept(i)} />
-                          <span style={{ fontSize: 14, fontWeight: 500 }}>{s.displayName}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button disabled
-                      style={{
-                        padding: '8px 20px',
-                        background: '#D1D5DB',
-                        color: '#fff', border: 'none', borderRadius: 'var(--radius)',
-                        fontSize: 14, fontWeight: 500, cursor: 'not-allowed',
-                      }}>
-                      开始会话 (待实现)
-                    </button>
-                    <button onClick={() => { setDistillPhase(''); setDistillSkills([]) }}
-                      style={{
-                        padding: '8px 20px', background: 'var(--bg)', color: 'var(--text-secondary)',
-                        border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14,
-                        cursor: 'pointer',
-                      }}>
-                      取消
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {distillPhase === 'error' && (
-                <div style={{ padding: 12, background: '#FEF2F2', borderRadius: 'var(--radius)', marginBottom: 12, fontSize: 14, color: '#DC2626' }}>
-                  ❌ {error}
-                  <button onClick={() => setDistillPhase('')}
-                    style={{ marginLeft: 12, padding: '2px 8px', background: 'transparent', border: '1px solid #DC2626', borderRadius: 'var(--radius)', cursor: 'pointer', color: '#DC2626', fontSize: 12 }}>
-                    重试
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {error && createMode !== 'distill' && <p style={{ color: '#DC2626', fontSize: 13, marginTop: 12 }}>{error}</p>}
+          {error && <p style={{ color: '#DC2626', fontSize: 13, marginTop: 12 }}>{error}</p>}
         </div>
       )}
 
@@ -596,20 +467,4 @@ export default function Dashboard() {
   )
 }
 
-function TabButton({ label, mode, current, onClick }: {
-  label: string; mode: string; current: string; onClick: (m: any) => void
-}) {
-  const selected = current === mode
-  return (
-    <button onClick={() => onClick(mode)}
-      style={{
-        padding: '6px 16px', borderRadius: 'var(--radius-full)',
-        background: selected ? 'var(--primary)' : 'var(--bg)',
-        color: selected ? '#fff' : 'var(--text-primary)',
-        border: selected ? 'none' : '1px solid var(--border)',
-        cursor: 'pointer', fontSize: 13, fontWeight: 500,
-      }}>
-      {label}
-    </button>
-  )
-}
+

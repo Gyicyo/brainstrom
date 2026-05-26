@@ -59,6 +59,7 @@ router.post('/', async (req, res) => {
     const batchResults = await Promise.allSettled(
       batch.map(async (role) => {
         const roleDir = sanitizeName(role.name);
+        sendSSE(res, 'phase', { phase: 'distill_start', expert: role.name });
         logger.debug(ns, `Starting distillation for ${role.name}`, { outputDir: path.join(baseDir, roleDir) });
         try {
           const result = await runNvwa({

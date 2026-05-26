@@ -59,7 +59,8 @@ export default function LLMConfig() {
     setTesting(true)
     setResults(null)
     try {
-      const resp = await fetch('http://localhost:3001/api/test-tools', {
+      const bridgeUrl = (import.meta as any).env?.VITE_BRIDGE_URL || 'http://localhost:3001'
+      const resp = await fetch(`${bridgeUrl}/api/test-tools`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
