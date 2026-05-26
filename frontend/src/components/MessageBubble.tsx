@@ -30,7 +30,7 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: align, marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexDirection: isHuman ? 'row-reverse' : 'row' }}>
-        <AgentAvatar name={isHuman ? 'You' : message.agent_name} isHuman={isHuman} size={34} />
+        <AgentAvatar name={isHuman ? '你' : message.agent_name} isHuman={isHuman} size={34} />
         <div style={{
           maxWidth: '80%', padding: '10px 14px', borderRadius: 'var(--radius-lg)',
           background: 'var(--bubble-ai-bg)', color: 'var(--text-primary)',
@@ -46,7 +46,7 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
               <span className="thinking-dot" />
               <span className="thinking-dot" />
               <span style={{ marginLeft: 6, fontSize: 13, color: 'var(--text-muted)' }}>
-                thinking...
+                思考中...
               </span>
             </span>
           ) : streamingContent !== undefined ? (
@@ -65,7 +65,7 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
                     display: 'flex', alignItems: 'center', gap: 4,
                     cursor: 'pointer',
                   }} onClick={(e) => { e.stopPropagation(); setExpanded(true) }}>
-                    Click to expand <span>▼</span>
+                    点击展开 <span>▼</span>
                   </div>
                 )}
               </div>
@@ -76,14 +76,14 @@ export default function MessageBubble({ message, isHuman, streamingContent }: Pr
         fontSize: 11, color: 'var(--text-muted)', marginTop: 4,
         paddingLeft: 42, display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        <span>{message.agent_name}{isHuman ? ' (You)' : ''} · {new Date(message.created_at).toLocaleTimeString()}</span>
+        <span>{message.agent_name}{isHuman ? '（你）' : ''} · {new Date(message.created_at).toLocaleTimeString()}</span>
         {expanded && isTruncatable && streamingContent === undefined && (
           <button onClick={(e) => { e.stopPropagation(); setExpanded(false) }}
             style={{
               background: 'none', border: 'none', color: 'var(--text-muted)',
               fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline',
             }}>
-            ▲ Collapse
+            ▲ 收起
           </button>
         )}
       </div>

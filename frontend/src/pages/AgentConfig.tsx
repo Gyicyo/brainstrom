@@ -37,7 +37,7 @@ export default function AgentConfig() {
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this agent?')) return
+    if (!confirm('删除此角色？')) return
     try {
       await deleteAgent(id)
       load()
@@ -49,7 +49,7 @@ export default function AgentConfig() {
     try {
       const agent = await getAgent(id)
       if (!agent) {
-        setTestResult({ success: false, message: 'Agent not found in database' })
+        setTestResult({ success: false, message: '数据库中未找到该角色' })
         setTestingId(null)
         return
       }
@@ -68,10 +68,10 @@ export default function AgentConfig() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Agent Configuration</h1>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>角色配置</h1>
         <button onClick={() => { setEditing({...emptyForm}); setEditId(null) }}
           style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>
-          + Add Agent
+          + 添加角色
         </button>
       </div>
 
@@ -80,41 +80,41 @@ export default function AgentConfig() {
           background: 'var(--surface)', padding: 24, borderRadius: 'var(--radius-lg)',
           marginBottom: 24, boxShadow: 'var(--shadow)', border: '1px solid var(--border)',
         }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{editId ? 'Edit Agent' : 'New Agent'}</h3>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{editId ? '编辑角色' : '新建角色'}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input placeholder="Name" value={editing.name || ''}
+            <input placeholder="名称" value={editing.name || ''}
               onChange={e => setEditing({ ...editing, name: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-            <textarea placeholder="Personality / Role Description" value={editing.personality || ''}
+            <textarea placeholder="性格 / 角色描述" value={editing.personality || ''}
               onChange={e => setEditing({ ...editing, personality: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none', minHeight: 60 }} />
-            <textarea placeholder="System Prompt" value={editing.system_prompt || ''}
+            <textarea placeholder="系统提示词" value={editing.system_prompt || ''}
               onChange={e => setEditing({ ...editing, system_prompt: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none', minHeight: 80 }} />
-            <input placeholder="Avatar URL (optional)" value={editing.avatar_url || ''}
+            <input placeholder="头像 URL（可选）" value={editing.avatar_url || ''}
               onChange={e => setEditing({ ...editing, avatar_url: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-            <input placeholder="API Base URL" value={editing.api_base_url || ''}
+            <input placeholder="API 接口地址" value={editing.api_base_url || ''}
               onChange={e => setEditing({ ...editing, api_base_url: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-            <input placeholder="API Key" type="password" value={editing.api_key || ''}
+            <input placeholder="API 密钥" type="password" value={editing.api_key || ''}
               onChange={e => setEditing({ ...editing, api_key: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-            <input placeholder="Model Name" value={editing.model_name || ''}
+            <input placeholder="模型名称" value={editing.model_name || ''}
               onChange={e => setEditing({ ...editing, model_name: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-            <span style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Web Search</span>
+            <span style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>网络搜索</span>
             <select value={editing.search_provider || 'duckduckgo'} onChange={e => setEditing({ ...editing, search_provider: e.target.value })}
               style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }}>
-              <option value="duckduckgo">DuckDuckGo (default, no API key)</option>
-              <option value="custom">Custom Search API</option>
+              <option value="duckduckgo">DuckDuckGo（默认，无需 API 密钥）</option>
+              <option value="custom">自定义搜索 API</option>
             </select>
             {editing.search_provider === 'custom' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <input placeholder="Search API URL" value={editing.search_api_url || ''}
+                <input placeholder="搜索 API 地址" value={editing.search_api_url || ''}
                   onChange={e => setEditing({ ...editing, search_api_url: e.target.value })}
                   style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
-                <input placeholder="Search API Key" type="password" value={editing.search_api_key || ''}
+                <input placeholder="搜索 API 密钥" type="password" value={editing.search_api_key || ''}
                   onChange={e => setEditing({ ...editing, search_api_key: e.target.value })}
                   style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, outline: 'none' }} />
               </div>
@@ -122,11 +122,11 @@ export default function AgentConfig() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={handleSave}
                 style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>
-                Save
+                保存
               </button>
               <button onClick={() => { setEditing(null); setEditId(null) }}
                 style={{ padding: '8px 20px', background: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 14 }}>
-                Cancel
+                取消
               </button>
             </div>
           </div>
@@ -135,7 +135,7 @@ export default function AgentConfig() {
 
       {agents.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 48, fontSize: 14 }}>
-          No agents configured. Add one to start!
+          尚未配置角色。添加一个开始吧！
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -158,15 +158,15 @@ export default function AgentConfig() {
                     color: '#fff', border: 'none', borderRadius: 'var(--radius)',
                     cursor: testingId === a.id ? 'not-allowed' : 'pointer', fontSize: 13,
                   }}>
-                  {testingId === a.id ? 'Testing...' : 'Test'}
+                  {testingId === a.id ? '测试中...' : '测试'}
                 </button>
                 <button onClick={() => { setEditing({...a}); setEditId(a.id) }}
                   style={{ padding: '4px 12px', background: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 13 }}>
-                  Edit
+                  编辑
                 </button>
                 <button onClick={() => handleDelete(a.id)}
                   style={{ padding: '4px 12px', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 13 }}>
-                  Delete
+                  删除
                 </button>
               </div>
             </div>
@@ -191,7 +191,7 @@ export default function AgentConfig() {
                 display: 'inline-block',
               }} />
               <strong style={{ fontSize: 15 }}>
-                {testResult.success ? 'Connection Successful' : 'Connection Failed'}
+                {testResult.success ? '连接成功' : '连接失败'}
               </strong>
             </div>
             <div style={{
@@ -207,7 +207,7 @@ export default function AgentConfig() {
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
                 cursor: 'pointer', fontSize: 14, fontWeight: 500,
               }}>
-              Close
+              关闭
             </button>
           </div>
         </div>

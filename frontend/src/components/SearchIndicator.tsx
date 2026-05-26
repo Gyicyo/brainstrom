@@ -12,9 +12,9 @@ export default function SearchIndicator({ searchStatus }: Props) {
       fontSize: 11, color: searchStatus.status === 'searching' ? '#92400E' : '#6B7280',
       marginLeft: 6,
     }}>
-      {searchStatus.status === 'searching' && <>🔍 Searching{searchStatus.query ? `: "${searchStatus.query.slice(0, 40)}..."` : ''}</>}
-      {searchStatus.status === 'done' && '🌐 Searched'}
-      {searchStatus.status === 'failed' && '🌐 Search unavailable'}
+      {searchStatus.status === 'searching' && <>🔍 搜索中{searchStatus.query ? `: "${searchStatus.query.slice(0, 40)}..."` : ''}</>}
+      {searchStatus.status === 'done' && '🌐 已搜索'}
+      {searchStatus.status === 'failed' && '🌐 搜索不可用'}
     </span>
   )
 }

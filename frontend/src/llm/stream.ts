@@ -21,21 +21,17 @@ export async function* streamAgentResponse(
   maxTokens = 4096,
   signal?: AbortSignal,
 ): AsyncGenerator<string, void, undefined> {
-  throw new Error('Use streamAgentChat with sessionId and agentName instead');
+  throw new Error('请改用 streamAgentChat，传入 sessionId 和 agentName');
 }
 
 export async function* streamAgentChat(
   sessionId: number,
   agentName: string,
   message: string,
-  agent: AgentRecord,
+  _agent: AgentRecord,
   signal?: AbortSignal,
 ): AsyncGenerator<string, void, undefined> {
-  yield* streamChat(sessionId, agentName, message, {
-    apiBaseUrl: agent.api_base_url,
-    apiKey: agent.api_key,
-    modelName: agent.model_name,
-  }, signal);
+  yield* streamChat(sessionId, agentName, message, signal);
 }
 
 export { streamScribeSummary };
@@ -47,7 +43,7 @@ export async function callAgent(
   maxTokens = 4096,
   signal?: AbortSignal,
 ): Promise<string> {
-  throw new Error('Direct LLM calls are no longer supported. Use bridge API.');
+  throw new Error('直接 LLM 调用已不再支持。请使用桥接 API。');
 }
 
 export async function* streamAgentResponseWithTools(
@@ -57,7 +53,7 @@ export async function* streamAgentResponseWithTools(
   maxTokens = 4096,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent, void, undefined> {
-  throw new Error('Tool handling is now done by pi-agent. Use streamAgentChat instead.');
+  throw new Error('工具处理已由 pi-agent 接管。请改用 streamAgentChat。');
 }
 
 export async function callAgentWithTools(
@@ -67,5 +63,5 @@ export async function callAgentWithTools(
   maxTokens = 4096,
   signal?: AbortSignal,
 ): Promise<{ content: string; tool_calls?: { id: string; type: string; function: { name: string; arguments: string } }[] }> {
-  throw new Error('Tool handling is now done by pi-agent. Use bridge API instead.');
+  throw new Error('工具处理已由 pi-agent 接管。请使用桥接 API。');
 }

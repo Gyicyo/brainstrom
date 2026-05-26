@@ -9,7 +9,7 @@ export default function RoundDivider({ roundNumber }: Props) {
       color: 'var(--primary)', fontSize: 14,
     }}>
       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-      <span style={{ fontWeight: 600, letterSpacing: '0.02em' }}>Round {roundNumber}</span>
+      <span style={{ fontWeight: 600, letterSpacing: '0.02em' }}>第 {roundNumber} 轮</span>
       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   )

@@ -60,8 +60,8 @@ export default function ChatRoom({
 
       function agentName(mid: number): string {
         const sa = saRecords.find(s => s.generated_agent_id === mid)
-        if (sa) return genNameMap.get(mid) || 'Unknown'
-        return presetNameMap.get(mid) || 'Unknown'
+        if (sa)       return genNameMap.get(mid) || '未知'
+        return presetNameMap.get(mid) || '未知'
       }
 
       const prev: RoundHistory[] = []
@@ -72,7 +72,7 @@ export default function ChatRoom({
           round_number: r.round_number,
           scribe_summary: r.scribe_summary || '',
           messages: msgs.map(m => ({
-            agent_name: m.is_human ? 'Human' : (m.agent_id != null ? agentName(m.agent_id) : ''),
+            agent_name: m.is_human ? '用户' : (m.agent_id != null ? agentName(m.agent_id) : ''),
             content: m.content,
             is_human: m.is_human,
           })),
@@ -114,12 +114,12 @@ export default function ChatRoom({
         height: '100%', gap: 12, maxWidth: 600, margin: '0 auto',
       }}>
         <p style={{ color: 'var(--text-secondary)', fontSize: 15, textAlign: 'center' }}>
-          Enter initial context to start the brainstorming session.
-        </p>
-        <textarea
-          value={initialContext}
-          onChange={e => setInitialContext(e.target.value)}
-          placeholder="Describe the topic or question you'd like the agents to discuss..."
+            输入初始上下文，开始头脑风暴讨论。
+          </p>
+          <textarea
+            value={initialContext}
+            onChange={e => setInitialContext(e.target.value)}
+            placeholder="描述你希望各角色讨论的话题或问题..."
           rows={4}
           style={{
             width: '100%', padding: 12, border: '1px solid var(--border)',
@@ -137,7 +137,7 @@ export default function ChatRoom({
             cursor: loading || !initialContext.trim() ? 'not-allowed' : 'pointer',
             fontSize: 14, fontWeight: 500,
           }}>
-          {loading ? 'Sending...' : 'Send'}
+          {loading ? '发送中...' : '发送'}
         </button>
       </div>
     )
@@ -168,7 +168,7 @@ export default function ChatRoom({
             <span className="thinking-dot" />
             <span className="thinking-dot" />
           </span>
-          Agents are generating responses...
+          各角色正在生成回复...
         </div>
       )}
 
@@ -190,7 +190,7 @@ export default function ChatRoom({
                 border: '1px solid var(--border)', userSelect: 'none',
               }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                {expandedRound === h.round_number ? '▼' : '▶'} Round {h.round_number}
+                {expandedRound === h.round_number ? '▼' : '▶'} 第 {h.round_number} 轮
               </span>
               {h.scribe_summary && (
                 <span style={{
@@ -201,7 +201,7 @@ export default function ChatRoom({
                 </span>
               )}
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {h.messages.filter(m => !m.is_human).length} replies
+                {h.messages.filter(m => !m.is_human).length} 条回复
               </span>
             </div>
 
@@ -222,7 +222,7 @@ export default function ChatRoom({
                     marginTop: 8, padding: 10, background: 'var(--primary-light)',
                     borderRadius: 'var(--radius)', borderLeft: '3px solid var(--primary)', fontSize: 13,
                   }}>
-                    <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 4 }}>Scribe Summary</div>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 4 }}>书记官总结</div>
                     <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{h.scribe_summary}</div>
                   </div>
                 )}
@@ -236,7 +236,7 @@ export default function ChatRoom({
         {/* Public messages */}
         {current_round.public_messages.length === 0 ? (
           <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40, fontSize: 14 }}>
-            Waiting for agents to respond...
+            等待各角色回复...
           </p>
         ) : (
           current_round.public_messages.map(m => (
@@ -257,14 +257,16 @@ export default function ChatRoom({
             marginBottom: 16, marginTop: 16,
           }}>
             <div style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 8, fontWeight: 500 }}>
-              Private thread with {t.agent_name}
+              与 {t.agent_name} 的私密对话
             </div>
             {t.messages.map(tm => (
               <div key={tm.id}>
                 <MessageBubble message={{
-                  id: tm.id, agent_id: null, agent_name: tm.is_human ? 'You' : t.agent_name,
+                  id: tm.id, agent_id: null,
+                  agent_name: tm.is_human ? '你' : t.agent_name,
                   is_human: tm.is_human, content: tm.content, created_at: tm.created_at,
-                }} isHuman={tm.is_human} />
+                }} isHuman={tm.is_human}
+                  streamingContent={!tm.is_human ? streamContents?.[t.agent_id] : undefined} />
               </div>
             ))}
           </div>
@@ -277,7 +279,7 @@ export default function ChatRoom({
             borderRadius: 'var(--radius)', borderLeft: '3px solid var(--primary)',
           }}>
             <div style={{ fontSize: 12, color: 'var(--primary)', marginBottom: 6, fontWeight: 600 }}>
-              {streamingScribeContent ? 'Scribe is summarizing...' : 'Scribe Summary'}
+              {streamingScribeContent ? '书记官正在总结...' : '书记官总结'}
             </div>
             <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text-primary)', lineHeight: 1.6 }}>
               {streamingScribeContent || current_round.scribe_summary}
@@ -292,7 +294,7 @@ export default function ChatRoom({
             gap: 12, padding: 40,
           }}>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, textAlign: 'center' }}>
-              Initial context submitted. Ready to start the agent discussion?
+              初始上下文已提交。准备开始角色讨论？
             </p>
             <button onClick={onStartDivergent} disabled={loading || isStreaming}
               style={{
@@ -301,7 +303,7 @@ export default function ChatRoom({
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
                 cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
-              {loading || isStreaming ? 'Starting...' : 'Start Agent Discussion'}
+              {loading || isStreaming ? '启动中...' : '开始角色讨论'}
             </button>
           </div>
         )}
@@ -344,7 +346,7 @@ export default function ChatRoom({
                   border: '1px solid var(--primary-border)', fontSize: 13,
                   cursor: isStreaming ? 'not-allowed' : 'pointer', opacity: isStreaming ? 0.5 : 1,
                 }}>
-                {selectedAgentIds.length === nonScribeAgents.length ? 'Deselect All' : '@All'}
+                {selectedAgentIds.length === nonScribeAgents.length ? '取消全选' : '@全部'}
               </button>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -355,7 +357,7 @@ export default function ChatRoom({
                     sendMention()
                   }
                 }}
-                placeholder={isStreaming ? 'Waiting for responses...' : "Ask a follow-up..."}
+                placeholder={isStreaming ? '等待回复中...' : '追问...'}
                 style={{
                   flex: 1, padding: '8px 12px', border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)', fontSize: 14, outline: 'none',
@@ -374,7 +376,7 @@ export default function ChatRoom({
                     ? 'not-allowed' : 'pointer',
                   fontSize: 14, fontWeight: 500, flexShrink: 0,
                 }}>
-                @Send
+                @发送
               </button>
             </div>
           </div>
@@ -388,7 +390,7 @@ export default function ChatRoom({
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
                 cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
-              End Round & Summarize
+              结束本轮并总结
             </button>
             <button onClick={onStartNextRound} disabled={loading || !!isStreaming}
               style={{
@@ -397,7 +399,7 @@ export default function ChatRoom({
                 color: '#fff', border: 'none', borderRadius: 'var(--radius)',
                 cursor: loading || isStreaming ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 500,
               }}>
-              Start Next Round
+              开始下一轮
             </button>
           </div>
         </>

@@ -5,10 +5,10 @@ import ChatRoom from '../components/ChatRoom'
 
 function getPhaseLabel(roundDetail: NonNullable<ReturnType<typeof useSession>['roundDetail']>): string {
   const round = roundDetail.current_round
-  if (round.scribe_summary) return `Round ${round.round_number} · Ended`
-  if (round.private_threads.length > 0) return `Round ${round.round_number} · Mention Phase`
-  if (round.public_messages.length > 0) return `Round ${round.round_number} · Divergent Phase`
-  return `Round ${round.round_number} · Starting`
+  if (round.scribe_summary) return `第 ${round.round_number} 轮 · 已结束`
+  if (round.private_threads.length > 0) return `第 ${round.round_number} 轮 · 追问阶段`
+  if (round.public_messages.length > 0) return `第 ${round.round_number} 轮 · 发散阶段`
+  return `第 ${round.round_number} 轮 · 等待开始`
 }
 
 function SummaryCard({ summary }: { summary: { round_number: number; summary: string; created_at: string } }) {
@@ -56,7 +56,7 @@ export default function SessionView() {
   }, [sidebarOpen, sessionId, fetchSummaries])
 
   const endSession = async () => {
-    if (!confirm('End this session and generate final report?')) return
+    if (!confirm('结束此会话并生成最终报告？')) return
     try {
       await handleEndSession()
       navigate('/')
@@ -66,7 +66,7 @@ export default function SessionView() {
   }
 
   const deleteCurrent = async () => {
-    if (!confirm('Delete this session and all its data?')) return
+    if (!confirm('删除此会话及其所有数据？')) return
     try {
       await handleDeleteSession()
       navigate('/')
@@ -96,7 +96,7 @@ export default function SessionView() {
             borderBottom: '1px solid var(--border)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
-            Round Summaries
+            轮次总结
             <button onClick={() => setSidebarOpen(false)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)' }}>
               ✕
@@ -104,7 +104,7 @@ export default function SessionView() {
           </div>
           {summaries.length === 0 ? (
             <p style={{ padding: 16, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
-              No summaries yet
+              暂无总结
             </p>
           ) : (
             summaries.map(s => (
@@ -132,7 +132,7 @@ export default function SessionView() {
             </button>
             <div>
               <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-                {session?.topic || 'Brainstorm Session'}
+                {session?.topic || '头脑风暴会话'}
               </h1>
               {phaseLabel && (
                 <div style={{
@@ -152,7 +152,7 @@ export default function SessionView() {
                 border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer',
                 fontSize: 13, fontWeight: 500, flexShrink: 0,
               }}>
-              Delete
+              删除
             </button>
             <button onClick={endSession}
               style={{
@@ -160,7 +160,7 @@ export default function SessionView() {
                 border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer',
                 fontSize: 13, fontWeight: 500, flexShrink: 0,
               }}>
-              End Session
+              结束会话
             </button>
           </div>
         </div>

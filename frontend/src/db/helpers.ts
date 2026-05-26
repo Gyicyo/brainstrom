@@ -104,23 +104,23 @@ export async function deleteGeneratedAgentsBySession(sessionId: number): Promise
   await db.generatedAgents.where('session_id').equals(sessionId).delete();
 }
 
-export async function createSessionWithGeneratedAgents(
+export async function createSessionWithRoles(
   data: Omit<SessionRecord, 'id' | 'created_at'>,
-  generatorAgentId: number,
-  scribeAgentId: number,
-  generatedAgents: Omit<GeneratedAgentRecord, 'id' | 'created_at' | 'session_id'>[],
+  roles: ({ name: string; personality: string; system_prompt: string } & { is_scribe: boolean })[],
 ): Promise<number> {
   return db.transaction('rw', db.sessions, db.sessionAgents, db.generatedAgents, async () => {
     const sid = await db.sessions.add({ ...data, created_at: new Date().toISOString() });
-    const createdIds: number[] = [];
-    for (const ga of generatedAgents) {
-      const gaid = await db.generatedAgents.add({ ...ga, session_id: sid, created_at: new Date().toISOString() });
-      createdIds.push(gaid);
+    const rows: SessionAgentRecord[] = [];
+    for (const r of roles) {
+      const gaid = await db.generatedAgents.add({
+        name: r.name,
+        personality: r.personality,
+        system_prompt: r.system_prompt,
+        session_id: sid,
+        created_at: new Date().toISOString(),
+      });
+      rows.push({ session_id: sid, agent_id: 0, generated_agent_id: gaid, is_scribe: r.is_scribe });
     }
-    const rows: SessionAgentRecord[] = [
-      { session_id: sid, agent_id: scribeAgentId, is_scribe: true },
-    ];
-    rows.push(...createdIds.map(gaid => ({ session_id: sid, agent_id: generatorAgentId, generated_agent_id: gaid, is_scribe: false })));
     await db.sessionAgents.bulkAdd(rows);
     return sid;
   });

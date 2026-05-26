@@ -1,46 +1,64 @@
 import { Router } from 'express';
 import { sendSSE, setupSSE } from '../sse.js';
 import { distillExperts } from '../distill.js';
+import { logger } from '../logger.js';
 
 const router = Router();
 
 router.post('/', async (req, res) => {
-  const { topic, apiConfig } = req.body;
+  const { topic, apiConfig, context } = req.body;
+  const ns = 'route.distill';
+
+  logger.info(ns, 'POST /api/distill received', {
+    topic,
+    hasContext: !!context,
+    contextLength: context?.length || 0,
+    hasApiKey: !!apiConfig?.apiKey,
+    apiKeyMasked: apiConfig?.apiKey ? logger.maskKey(apiConfig.apiKey) : 'NONE',
+    modelName: apiConfig?.modelName,
+    baseUrl: apiConfig?.apiBaseUrl,
+  });
+
   if (!topic || !apiConfig?.apiKey) {
+    logger.warn(ns, 'Validation failed', { hasTopic: !!topic, hasApiKey: !!apiConfig?.apiKey });
     return res.status(400).json({ error: 'topic and apiConfig.apiKey required' });
   }
 
-  const abortController = new AbortController();
-  req.on('close', () => {
-    console.error('[distill-route] request closed, aborting');
-    abortController.abort();
-  });
-
-  console.error('[distill-route] setupSSE start');
   setupSSE(req, res);
-  console.error('[distill-route] setupSSE done');
 
+  let skills = [];
+  const reqStart = Date.now();
   try {
-    console.error('[distill-route] calling distillExperts...');
-    const skills = await distillExperts(topic, apiConfig, (event) => {
+    logger.info(ns, 'Calling distillExperts...');
+    skills = await distillExperts(topic, apiConfig, (event) => {
+      logger.info(ns, `SSE phase event`, { phase: event.phase, ...event });
       sendSSE(res, 'phase', event);
-    }, abortController.signal);
-    console.error('[distill-route] distillExperts returned, skills length:', skills?.length, 'aborted:', abortController.signal.aborted);
+    }, context);
 
-    if (skills && Array.isArray(skills)) {
+    const elapsed = Date.now() - reqStart;
+    if (skills && skills.length > 0) {
+      logger.info(ns, `Distill succeeded`, {
+        count: skills.length,
+        skills: skills.map(s => ({ name: s.name, displayName: s.displayName })),
+        elapsedMs: elapsed,
+      });
       sendSSE(res, 'done', { skills });
-    } else if (abortController.signal.aborted) {
-      sendSSE(res, 'error', { message: 'Distillation cancelled' });
     } else {
+      logger.warn(ns, `Distill returned no skills`, { elapsedMs: elapsed });
       sendSSE(res, 'error', { message: 'No experts found for this topic' });
     }
   } catch (err) {
-    console.error('[distill-route] caught error:', err.message);
+    const elapsed = Date.now() - reqStart;
+    logger.error(ns, `Distill request failed`, {
+      error: err.message,
+      stack: err.stack,
+      elapsedMs: elapsed,
+    });
     sendSSE(res, 'error', { message: err.message });
   }
 
-  console.error('[distill-route] calling res.end()');
   res.end();
+  logger.info(ns, 'Response sent');
 });
 
 export default router;

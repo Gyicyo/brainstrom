@@ -1,107 +1,108 @@
 import { Router } from 'express';
-import { roomManager } from '../roomManager.js';
+import { piSessionManager } from '../piSessionManager.js';
+import { saveSession, loadSession, deleteSessionDir, sessionDirExists } from '../sessionStore.js';
 import { sendSSE, setupSSE } from '../sse.js';
+import { logger } from '../logger.js';
 
 const router = Router();
+const ns = 'route.rooms';
 
-// POST /api/room/create
 router.post('/create', async (req, res) => {
   try {
-    const { sessionId, topic, agents, scribeApiConfig } = req.body;
-    await roomManager.createRoom(sessionId, topic, agents, scribeApiConfig);
+    const { sessionId, topic, agents, apiConfig } = req.body;
+    if (!sessionId || !topic || !agents || !apiConfig?.apiKey) {
+      return res.status(400).json({ error: '缺少必填参数：sessionId、topic、agents、apiConfig.apiKey' });
+    }
+
+    const allAgents = [
+      ...agents,
+      {
+        name: '__scribe__',
+        skillContent: '你是一名中立的书记官。简洁地总结讨论内容。记录关键观点、共识和分歧。保持中立。',
+      },
+    ];
+
+    piSessionManager.createSession(sessionId, { agents: allAgents, apiConfig });
+    saveSession(sessionId, { topic, agents: allAgents, apiConfig });
+
+    logger.info(ns, 'Room created', { sessionId, topic, agentCount: agents.length });
     res.json({ ok: true });
   } catch (err) {
+    logger.error(ns, 'Create failed', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/room/:id/chat
 router.post('/:id/chat', async (req, res) => {
-  const { agentName, message, apiConfig } = req.body;
+  const { agentName, message } = req.body;
+  const roomId = req.params.id;
 
-  try {
-    const agent = roomManager.getAgent(req.params.id, agentName);
-    setupSSE(req, res);
-
-    const unsubscribe = agent.subscribe((event) => {
-      if (event.type === 'message_update' &&
-          event.assistantMessageEvent.type === 'text_delta') {
-        sendSSE(res, 'text_delta', { text: event.assistantMessageEvent.delta });
-      }
-      if (event.type === 'tool_execution_start') {
-        sendSSE(res, 'tool_start', { name: event.toolName, args: event.args });
-      }
-      if (event.type === 'tool_execution_end') {
-        sendSSE(res, 'tool_end', { name: event.toolName, isError: event.isError });
-      }
-      if (event.type === 'agent_end') {
-        sendSSE(res, 'done', {});
-        res.end();
-        unsubscribe();
-      }
-    });
-
-    await agent.prompt({ role: 'user', content: message, timestamp: Date.now() });
-  } catch (err) {
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
+  if (!piSessionManager.hasSession(roomId)) {
+    const stored = loadSession(roomId);
+    if (stored) {
+      piSessionManager.createSession(roomId, { agents: stored.agents, apiConfig: stored.apiConfig });
     } else {
-      sendSSE(res, 'error', { message: err.message });
-      res.end();
+      return res.status(404).json({ error: `房间 ${roomId} 未找到` });
     }
   }
-});
-
-// POST /api/room/:id/summarize
-router.post('/:id/summarize', async (req, res) => {
-  const { discussion } = req.body;
-  const promptText = 'Summarize this discussion concisely. Capture key points, agreements, and disagreements. Be neutral.\n\n' +
-    (discussion || []).map(d => `${d.name}: ${d.content}`).join('\n\n');
 
   try {
-    const agent = roomManager.getScribe(req.params.id);
     setupSSE(req, res);
-
-    const unsubscribe = agent.subscribe((event) => {
-      if (event.type === 'message_update' &&
-          event.assistantMessageEvent.type === 'text_delta') {
-        sendSSE(res, 'text_delta', { text: event.assistantMessageEvent.delta });
-      }
-      if (event.type === 'agent_end') {
-        sendSSE(res, 'done', {});
-        res.end();
-        unsubscribe();
-      }
-    });
-
-    await agent.prompt({ role: 'user', content: promptText, timestamp: Date.now() });
+    const stream = piSessionManager.chatStream(roomId, agentName, message);
+    for await (const ev of stream) {
+      if (ev.type === 'text_delta') sendSSE(res, 'text_delta', { text: ev.text });
+      if (ev.type === 'done') { sendSSE(res, 'done', {}); res.end(); }
+    }
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else { sendSSE(res, 'error', { message: err.message }); res.end(); }
   }
 });
 
-// GET /api/room/:id/resume
-router.get('/:id/resume', async (req, res) => {
+router.post('/:id/summarize', async (req, res) => {
+  const roomId = req.params.id;
+  const { discussion } = req.body;
+  const promptText = '简洁地总结这场讨论。记录关键观点、共识和分歧。保持中立。\n\n' +
+    (discussion || []).map(d => `${d.name}: ${d.content}`).join('\n\n');
+
+  if (!piSessionManager.hasSession(roomId)) {
+    const stored = loadSession(roomId);
+    if (stored) {
+      piSessionManager.createSession(roomId, { agents: stored.agents, apiConfig: stored.apiConfig });
+    } else {
+      return res.status(404).json({ error: `房间 ${roomId} 未找到` });
+    }
+  }
+
   try {
-    const { agents, scribeApiConfig } = req.query;
-    const parsedAgents = agents ? JSON.parse(agents) : [];
-    const parsedScribe = scribeApiConfig ? JSON.parse(scribeApiConfig) : undefined;
-    await roomManager.resumeRoom(req.params.id, parsedAgents, parsedScribe);
-    res.json({ ok: true });
+    setupSSE(req, res);
+    const stream = piSessionManager.chatStream(roomId, '__scribe__', promptText);
+    for await (const ev of stream) {
+      if (ev.type === 'text_delta') sendSSE(res, 'text_delta', { text: ev.text });
+      if (ev.type === 'done') { sendSSE(res, 'done', {}); res.end(); }
+    }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else { sendSSE(res, 'error', { message: err.message }); res.end(); }
   }
 });
 
-// DELETE /api/room/:id
 router.delete('/:id', async (req, res) => {
-  try {
-    await roomManager.deleteRoom(req.params.id);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  piSessionManager.deleteSession(req.params.id);
+  deleteSessionDir(req.params.id);
+  res.json({ ok: true });
+});
+
+router.post('/resume', async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) return res.status(400).json({ error: '缺少必填参数：sessionId' });
+
+  const stored = loadSession(sessionId);
+  if (!stored) return res.status(404).json({ error: `会话 ${sessionId} 在磁盘上未找到` });
+
+  piSessionManager.createSession(sessionId, { agents: stored.agents, apiConfig: stored.apiConfig });
+  logger.info(ns, 'Room resumed', { sessionId, agentCount: stored.agents.length });
+  res.json({ ok: true, agents: stored.agents.map(a => ({ name: a.name, hasSkill: !!a.skillContent })) });
 });
 
 export default router;

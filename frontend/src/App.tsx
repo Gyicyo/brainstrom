@@ -1,7 +1,7 @@
 import { Routes, Route, Link } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import SessionView from './pages/SessionView'
-import AgentConfig from './pages/AgentConfig'
+import LLMConfig from './pages/LLMConfig'
 
 function App() {
   return (
@@ -15,15 +15,15 @@ function App() {
         <Link to="/" style={{ fontWeight: 700, textDecoration: 'none', color: 'var(--primary)', fontSize: 16 }}>
           Brainstorm
         </Link>
-        <Link to="/agents" style={{ textDecoration: 'none', color: 'var(--text-secondary)', fontSize: 14 }}>
-          Agent Config
+        <Link to="/settings" style={{ textDecoration: 'none', color: 'var(--text-secondary)', fontSize: 14 }}>
+          LLM 设置
         </Link>
       </nav>
       <main style={{ maxWidth: 1200, margin: '24px auto', padding: '0 16px' }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/session/:id" element={<SessionView />} />
-          <Route path="/agents" element={<AgentConfig />} />
+          <Route path="/settings" element={<LLMConfig />} />
         </Routes>
       </main>
     </div>

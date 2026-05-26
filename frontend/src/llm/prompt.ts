@@ -70,35 +70,3 @@ export async function buildDivergentContext(
   return parts.join('\n\n');
 }
 
-export function buildGeneratorPrompt(
-  generatorName: string,
-  topic: string,
-  initialContext: string,
-  count: number,
-): string {
-  return `You are ${generatorName}. Generate ${count} discussion agents for a brainstorming session.
-Topic: ${topic}
-Initial context: ${initialContext}
-
-For each agent provide:
-- name: Role name (concise, like "Product Manager" or "Design Lead")
-- personality: One-sentence role description that sounds like a real person
-- system_prompt: Detailed instruction prompt for this role
-
-IMPORTANT guidelines for the system_prompt:
-- Instruct the agent to speak naturally, like a human in a conversation, not like an AI assistant
-- Avoid formal listing, bullet points, or report-style output
-- Encourage casual, conversational tone — use contractions, vary sentence length, show personality
-- The agent should disagree, ask questions, build on others' ideas — just like a real brainstorming participant
-- No preamble like "As an AI..." or "As a language model..."
-- Keep responses concise and to the point, like how real people talk in meetings
-
-Respond in this JSON format:
-{
-  "agents": [
-    { "name": "...", "personality": "...", "system_prompt": "..." }
-  ]
-}
-
-Generated agents are participants. The scribe (a separate preset agent) will summarize discussions.`;
-}
